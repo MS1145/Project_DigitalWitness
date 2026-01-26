@@ -1,0 +1,18 @@
+{
+  "transactions": [
+    {
+      "transaction_id": "TXN001",
+      "timestamp": "2026-01-17T10:25:17.300611",
+      "items": [
+        {
+          "sku": "ITEM001",
+          "name": "Snack Bar",
+          "quantity": 1,
+          "price": 2.99
+        }
+      ],
+      "total": 2.99,
+      "payment_method": "card"
+    }
+  ]
+}

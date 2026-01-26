@@ -1,0 +1,55 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Training data (large video files - download separately)
+data/training/normal/*.mp4
+data/training/shoplifting/*.mp4
+data/videos/*.mp4
+data/videos/*.avi
+
+# Generated model files (can be regenerated via python train.py)
+models/behavior_classifier.pkl
+models/video_processing_log.json
+
+# Keep visualization PNGs for reference but they can be regenerated
+# models/*.png
+
+# Output files (user-generated)
+outputs/cases/*.json
+outputs/clips/*.mp4
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Windows artifacts
+nul
+
+# Logs
+*.log
+
+# Claude Code settings (optional - can keep for team)
+# .claude/

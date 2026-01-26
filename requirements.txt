@@ -1,6 +1,10 @@
-opencv-python
+opencv-python-headless
 mediapipe
 numpy
 pandas
 matplotlib
 scikit-learn
+streamlit
+plotly
+joblib
+Pillow
