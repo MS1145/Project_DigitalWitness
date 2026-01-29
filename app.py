@@ -1,12 +1,9 @@
 """
-Digital Witness - MVP Demo UI
+Digital Witness - Phase 2 Demo UI
 
-A Streamlit-based web interface for demonstrating the shoplifting detection system.
-Features:
-- Video upload and analysis
-- POS data editor for mocking transactions
-- Model performance metrics display
-- Analysis results with visualizations
+Streamlit web interface with dual-mode video analysis:
+- Real-Time Mode: RTSP camera feed with interactive POS simulator
+- Upload Mode: Pre-recorded video with manual POS entry
 
 Run with: streamlit run app.py
 """
@@ -15,167 +12,294 @@ import tempfile
 import os
 import sys
 import json
+import time
+import threading
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 import numpy as np
 import pandas as pd
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.config import POS_PRODUCT_CATALOG, ALERTS_STORAGE_DIR
+from src.pos import POSSimulator
+from src.alerts import AlertManager, AlertStatus, NotificationService
+
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
-    page_title="Digital Witness - Retail Security Assistant",
+    page_title="Digital Witness - Main Dashboard",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    /* Main header styles */
-    .main-title {
-        font-size: 3rem;
-        font-weight: 800;
-        background: linear-gradient(120deg, #1e3a5f 0%, #2d5a87 50%, #3d7ab5 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
-        padding: 1rem 0;
-        margin-bottom: 0;
-    }
-    .subtitle {
-        font-size: 1.3rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2rem;
-        font-weight: 400;
-    }
+# Initialize theme in session state
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'
 
-    /* Metric cards */
-    .metric-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: bold;
-    }
-    .metric-label {
-        font-size: 1rem;
-        opacity: 0.9;
-    }
+# Theme-aware CSS
+def get_theme_css():
+    """Generate CSS based on current theme."""
+    is_dark = st.session_state.theme == 'dark'
 
-    /* Alert boxes */
-    .alert-critical {
-        background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    .alert-high {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    .alert-medium {
-        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        color: #333;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    .alert-low {
-        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-        color: #333;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    .alert-none {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
+    if is_dark:
+        bg_primary = '#0e1117'
+        bg_secondary = '#1a1d24'
+        bg_card = '#262730'
+        text_primary = '#fafafa'
+        text_secondary = '#b0b0b0'
+        border_color = '#3d4149'
+        sidebar_bg = '#1a1d24'
+    else:
+        bg_primary = '#ffffff'
+        bg_secondary = '#f8f9fa'
+        bg_card = '#ffffff'
+        text_primary = '#1e3a5f'
+        text_secondary = '#666666'
+        border_color = '#dee2e6'
+        sidebar_bg = '#f8f9fa'
 
-    /* Info boxes */
-    .info-box {
-        background-color: #f8f9fa;
-        border-left: 4px solid #1e3a5f;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 0 8px 8px 0;
-    }
+    return f"""
+    <style>
+        /* Theme variables */
+        :root {{
+            --bg-primary: {bg_primary};
+            --bg-secondary: {bg_secondary};
+            --bg-card: {bg_card};
+            --text-primary: {text_primary};
+            --text-secondary: {text_secondary};
+            --border-color: {border_color};
+        }}
 
-    /* Section headers */
-    .section-header {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #1e3a5f;
-        border-bottom: 3px solid #3d7ab5;
-        padding-bottom: 0.5rem;
-        margin: 2rem 0 1rem 0;
-    }
+        /* Page navigation */
+        .page-nav {{
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            padding: 15px;
+            background: {bg_secondary};
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }}
+        .page-nav-btn {{
+            padding: 10px 25px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.2s;
+        }}
+        .page-nav-btn-active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
+        }}
+        .page-nav-btn-inactive {{
+            background: {bg_card};
+            color: {text_secondary};
+            border: 1px solid {border_color};
+        }}
+        .page-nav-btn-inactive:hover {{
+            background: {border_color};
+        }}
 
-    /* Progress bar customization */
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    }
+        /* Main header styles */
+        .main-title {{
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(120deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            padding: 1rem 0;
+            margin-bottom: 0;
+        }}
+        .subtitle {{
+            font-size: 1.3rem;
+            color: {text_secondary};
+            text-align: center;
+            margin-bottom: 2rem;
+            font-weight: 400;
+        }}
 
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        font-size: 1.1rem;
-        font-weight: 600;
-        border-radius: 10px;
-        transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-    }
+        /* Metric cards */
+        .metric-container {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1.5rem;
+            border-radius: 15px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }}
+        .metric-value {{
+            font-size: 2.5rem;
+            font-weight: bold;
+        }}
+        .metric-label {{
+            font-size: 1rem;
+            opacity: 0.9;
+        }}
 
-    /* Card container */
-    .card {
-        background: white;
-        border-radius: 15px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        margin: 1rem 0;
-    }
+        /* Alert boxes */
+        .alert-critical {{
+            background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }}
+        .alert-high {{
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }}
+        .alert-medium {{
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: #333;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }}
+        .alert-low {{
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            color: #333;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }}
+        .alert-none {{
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }}
 
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+        /* Info boxes */
+        .info-box {{
+            background-color: {bg_secondary};
+            border-left: 4px solid #667eea;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+            color: {text_primary};
+        }}
 
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #f0f2f6;
-        border-radius: 10px 10px 0 0;
-        padding: 10px 20px;
-    }
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
+        /* Section headers */
+        .section-header {{
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: {text_primary};
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 0.5rem;
+            margin: 2rem 0 1rem 0;
+        }}
+
+        /* Progress bar customization */
+        .stProgress > div > div > div > div {{
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }}
+
+        /* Button styling */
+        .stButton > button {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        .stButton > button:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }}
+
+        /* Card container */
+        .card {{
+            background: {bg_card};
+            border-radius: 15px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            margin: 1rem 0;
+            border: 1px solid {border_color};
+        }}
+
+        /* Hide Streamlit branding */
+        #MainMenu {{visibility: hidden;}}
+        footer {{visibility: hidden;}}
+
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {{
+            gap: 8px;
+        }}
+        .stTabs [data-baseweb="tab"] {{
+            background-color: {bg_secondary};
+            border-radius: 10px 10px 0 0;
+            padding: 10px 20px;
+        }}
+        .stTabs [aria-selected="true"] {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }}
+
+        /* Mode selector styling */
+        .mode-active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+        }}
+
+        /* POS Simulator styling */
+        .pos-item-btn {{
+            background: {bg_secondary};
+            border: 1px solid {border_color};
+            border-radius: 8px;
+            padding: 10px;
+            margin: 5px 0;
+            transition: all 0.2s;
+        }}
+        .pos-item-btn:hover {{
+            background: {border_color};
+            transform: translateY(-2px);
+        }}
+
+        /* Real-time stats */
+        .realtime-stat {{
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }}
+
+        /* Connection status */
+        .connection-active {{
+            border-left: 4px solid #28a745;
+            padding-left: 10px;
+        }}
+        .connection-inactive {{
+            border-left: 4px solid #ffc107;
+            padding-left: 10px;
+        }}
+
+        /* Theme toggle */
+        .theme-toggle {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: {bg_secondary};
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }}
+    </style>
+    """
+
+# Apply theme CSS
+st.markdown(get_theme_css(), unsafe_allow_html=True)
 
 
 # ============== HELPER FUNCTIONS ==============
@@ -198,19 +322,35 @@ def load_model_metrics():
 
 
 def get_product_catalog():
-    """Get the product catalog for POS data."""
-    return [
-        {"sku": "ITEM001", "name": "Snack Bar", "price": 2.99},
-        {"sku": "ITEM002", "name": "Soda Bottle", "price": 1.99},
-        {"sku": "ITEM003", "name": "Chocolate Box", "price": 5.99},
-        {"sku": "ITEM004", "name": "Energy Drink", "price": 3.49},
-        {"sku": "ITEM005", "name": "Chips Bag", "price": 2.49},
-        {"sku": "ITEM006", "name": "Candy Pack", "price": 1.49},
-        {"sku": "ITEM007", "name": "Gum Pack", "price": 0.99},
-        {"sku": "ITEM008", "name": "Protein Bar", "price": 3.99},
-        {"sku": "ITEM009", "name": "Water Bottle", "price": 1.29},
-        {"sku": "ITEM010", "name": "Coffee Can", "price": 2.79},
-    ]
+    """Get the product catalog for POS data - uses config for consistency."""
+    return POS_PRODUCT_CATALOG
+
+
+def init_realtime_session_state():
+    """Initialize session state for real-time mode."""
+    if 'pos_simulator' not in st.session_state:
+        st.session_state.pos_simulator = POSSimulator()
+
+    if 'alert_manager' not in st.session_state:
+        st.session_state.alert_manager = AlertManager(ALERTS_STORAGE_DIR)
+
+    if 'notification_service' not in st.session_state:
+        st.session_state.notification_service = NotificationService()
+
+    if 'realtime_running' not in st.session_state:
+        st.session_state.realtime_running = False
+
+    if 'video_mode' not in st.session_state:
+        st.session_state.video_mode = "upload"  # "upload" or "realtime"
+
+    if 'rtsp_url' not in st.session_state:
+        st.session_state.rtsp_url = ""
+
+    if 'pos_cart' not in st.session_state:
+        st.session_state.pos_cart = []
+
+    if 'pos_session_active' not in st.session_state:
+        st.session_state.pos_session_active = False
 
 
 def create_pos_data(items_list, payment_method="card"):
@@ -243,10 +383,8 @@ def analyze_video(video_path, pos_data=None, progress_callback=None):
     """
     Analyze a video file and return results.
     """
-    from src.video.loader import VideoLoader
-    from src.pose.estimator import PoseEstimator
-    from src.pose.feature_extractor import FeatureExtractor
-    from src.pose.behavior_classifier import BehaviorClassifier
+    from src.video import VideoLoader
+    from src.pose import PoseEstimator, FeatureExtractor, BehaviorClassifier
     from src.config import SLIDING_WINDOW_SIZE, SLIDING_WINDOW_STRIDE
 
     results = {
@@ -467,8 +605,25 @@ def generate_intent_explanation(score, shoplifting_events, items_billed):
 
 # ============== UI COMPONENTS ==============
 
+def render_theme_toggle():
+    """Render theme toggle at the top of the page."""
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col3:
+        # Theme toggle using checkbox styled as switch
+        is_dark = st.toggle(
+            "Dark Mode",
+            value=st.session_state.theme == 'dark',
+            key="theme_toggle_main"
+        )
+        new_theme = 'dark' if is_dark else 'light'
+        if new_theme != st.session_state.theme:
+            st.session_state.theme = new_theme
+            st.rerun()
+
+
 def render_header():
     """Render the main header."""
+    render_theme_toggle()
     st.markdown('<h1 class="main-title">Digital Witness</h1>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Bias-Aware, Explainable Retail Security Assistant</p>', unsafe_allow_html=True)
 
@@ -477,6 +632,14 @@ def render_sidebar():
     """Render the sidebar."""
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/security-checked.png", width=80)
+
+        # Navigation
+        st.markdown("### Navigation")
+        st.page_link("app.py", label="Main Dashboard", icon="📊")
+        st.page_link("pages/Security_Manager.py", label="Security Manager", icon="🛡️")
+
+        st.markdown("---")
+
         st.markdown("### About Digital Witness")
         st.markdown("""
         An AI-powered security assistant that detects potential shoplifting through:
@@ -500,6 +663,19 @@ def render_sidebar():
         else:
             st.error("Model: Not Found")
             st.warning("Run `python train.py` first")
+
+        st.markdown("---")
+
+        # Email notification status
+        st.markdown("### Notifications")
+        try:
+            if st.session_state.notification_service.is_email_configured:
+                st.success("Email: Configured")
+            else:
+                st.warning("Email: Not configured")
+                st.caption("Set EMAIL_SENDER and EMAIL_PASSWORD env vars")
+        except Exception:
+            st.info("Email: Check config")
 
         st.markdown("---")
 
@@ -925,8 +1101,82 @@ def render_analysis_results(results):
         """, unsafe_allow_html=True)
 
 
+def render_pos_simulator():
+    """Render the interactive POS simulator panel for real-time mode."""
+    st.markdown("### POS Simulator")
+    st.markdown("Scan items as they are purchased in real-time.")
+
+    # Initialize POS session if not active
+    if not st.session_state.pos_session_active:
+        if st.button("Start New Transaction", type="primary", use_container_width=True):
+            st.session_state.pos_simulator.start_session()
+            st.session_state.pos_session_active = True
+            st.session_state.pos_cart = []
+            st.rerun()
+        return None
+
+    # Product buttons grid
+    st.markdown("**Scan Items:**")
+    catalog = get_product_catalog()
+
+    # Display products in 2 columns
+    cols = st.columns(2)
+    for i, product in enumerate(catalog):
+        col = cols[i % 2]
+        with col:
+            btn_label = f"{product['name']}\n${product['price']:.2f}"
+            if st.button(btn_label, key=f"scan_{product['sku']}", use_container_width=True):
+                # Scan the item
+                scan_event = st.session_state.pos_simulator.scan_item(product['sku'])
+                if scan_event:
+                    st.session_state.pos_cart.append({
+                        'sku': product['sku'],
+                        'name': product['name'],
+                        'price': product['price'],
+                        'quantity': 1
+                    })
+                    st.rerun()
+
+    st.markdown("---")
+
+    # Cart display
+    st.markdown("**Current Cart:**")
+    if st.session_state.pos_cart:
+        total = 0.0
+        for item in st.session_state.pos_cart:
+            st.write(f"- {item['name']}: ${item['price']:.2f}")
+            total += item['price']
+        st.markdown(f"**Total: ${total:.2f}**")
+    else:
+        st.info("No items scanned yet")
+
+    # Transaction actions
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Complete Transaction", type="primary", use_container_width=True):
+            transaction = st.session_state.pos_simulator.complete_transaction()
+            st.session_state.pos_session_active = False
+            if transaction:
+                st.success(f"Transaction {transaction.transaction_id} completed!")
+            st.rerun()
+
+    with col2:
+        if st.button("Cancel Transaction", use_container_width=True):
+            st.session_state.pos_simulator.void_session()
+            st.session_state.pos_session_active = False
+            st.session_state.pos_cart = []
+            st.rerun()
+
+    # Return current POS data for analysis
+    if st.session_state.pos_cart:
+        return create_pos_data(st.session_state.pos_cart)
+    return None
+
+
 def render_pos_editor():
-    """Render the POS data editor."""
+    """Render the POS data editor for upload mode."""
     st.markdown("### POS Transaction Editor")
     st.markdown("Configure the point-of-sale data to simulate different scenarios.")
 
@@ -1007,6 +1257,190 @@ def render_pos_editor():
     return None
 
 
+# ============== MODE RENDERERS ==============
+
+def render_realtime_mode():
+    """Render the real-time camera mode UI."""
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("### Camera Connection")
+
+        # RTSP URL input
+        rtsp_url = st.text_input(
+            "RTSP Camera URL",
+            value=st.session_state.rtsp_url,
+            placeholder="rtsp://username:password@192.168.1.100:554/stream",
+            help="Enter your IP camera's RTSP URL"
+        )
+        st.session_state.rtsp_url = rtsp_url
+
+        # Webcam fallback option
+        use_webcam = st.checkbox(
+            "Use webcam instead (for testing)",
+            value=False,
+            help="Use your computer's webcam if no RTSP camera available"
+        )
+
+        # Connection status
+        st.markdown("---")
+
+        if st.session_state.realtime_running:
+            st.success("Camera: Connected")
+            if st.button("Stop Analysis", type="secondary", use_container_width=True):
+                st.session_state.realtime_running = False
+                st.rerun()
+
+            # Display real-time stats
+            st.markdown("### Live Statistics")
+            stats_placeholder = st.empty()
+
+            # Simulated stats for demo (in real implementation, these come from RealtimeProcessor)
+            with stats_placeholder.container():
+                stat_col1, stat_col2, stat_col3 = st.columns(3)
+                with stat_col1:
+                    st.metric("Frames", "Processing...")
+                with stat_col2:
+                    st.metric("Risk Score", "0.00")
+                with stat_col3:
+                    st.metric("Behaviors", "0")
+
+            st.info("Real-time processing is running. Check Manager Dashboard for alerts.")
+
+        else:
+            st.warning("Camera: Not connected")
+
+            can_start = bool(rtsp_url) or use_webcam
+            if st.button(
+                "Start Real-Time Analysis",
+                type="primary",
+                use_container_width=True,
+                disabled=not can_start
+            ):
+                if can_start:
+                    st.session_state.realtime_running = True
+                    st.success("Starting real-time analysis...")
+                    st.rerun()
+
+            if not can_start:
+                st.caption("Enter RTSP URL or enable webcam to start")
+
+        # Webhook info
+        st.markdown("---")
+        st.markdown("### POS API Webhook")
+        st.code("POST http://localhost:5001/webhook/pos", language="text")
+        st.caption("External POS systems can send transactions to this endpoint")
+
+    with col2:
+        # POS Simulator
+        st.markdown("### POS Simulator")
+        pos_data = render_pos_simulator()
+        if pos_data:
+            st.session_state.pos_data = pos_data
+
+
+def render_upload_mode():
+    """Render the upload video mode UI (original functionality)."""
+    # Video upload section
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("### Upload Video")
+        uploaded_file = st.file_uploader(
+            "Choose a video file to analyze",
+            type=['mp4', 'avi', 'mov', 'mkv'],
+            help="Upload a video file to analyze for potential shoplifting behavior"
+        )
+
+        # Sample videos
+        st.markdown("**Or select a sample video:**")
+
+        sample_videos = []
+        training_normal = Path("data/training/normal")
+        training_shoplifting = Path("data/training/shoplifting")
+
+        if training_normal.exists():
+            normal_vids = list(training_normal.glob("*.mp4"))[:3]
+            sample_videos.extend([(v, "normal") for v in normal_vids])
+        if training_shoplifting.exists():
+            shoplifting_vids = list(training_shoplifting.glob("*.mp4"))[:3]
+            sample_videos.extend([(v, "shoplifting") for v in shoplifting_vids])
+
+        selected_sample = None
+        if sample_videos:
+            options = ["-- Select a sample --"] + [f"{v.name} ({label})" for v, label in sample_videos]
+            selected_option = st.selectbox("Sample videos", options, label_visibility="collapsed")
+            if selected_option != "-- Select a sample --":
+                idx = options.index(selected_option) - 1
+                selected_sample = sample_videos[idx][0]
+
+    with col2:
+        # Video preview
+        if uploaded_file:
+            st.markdown("### Preview")
+            st.video(uploaded_file)
+
+    st.markdown("---")
+
+    # POS Editor for upload mode
+    pos_data = render_pos_editor()
+    if pos_data:
+        st.session_state.pos_data = pos_data
+
+    st.markdown("---")
+
+    # Analysis button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        analyze_clicked = st.button(
+            "Analyze Video",
+            type="primary",
+            use_container_width=True,
+            disabled=(uploaded_file is None and selected_sample is None)
+        )
+
+    # Run analysis
+    if analyze_clicked:
+        video_path = None
+
+        if uploaded_file is not None:
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                video_path = tmp_file.name
+        elif selected_sample is not None:
+            video_path = str(selected_sample)
+
+        if video_path:
+            # Progress tracking
+            st.markdown("### Processing")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            def update_progress(progress, message):
+                progress_bar.progress(progress)
+                status_text.text(message)
+
+            # Run analysis
+            with st.spinner("Analyzing video..."):
+                results = analyze_video(
+                    video_path,
+                    pos_data=st.session_state.pos_data,
+                    progress_callback=update_progress
+                )
+
+            # Clean up temp file
+            if uploaded_file is not None and os.path.exists(video_path):
+                os.unlink(video_path)
+
+            # Store results
+            st.session_state.analysis_results = results
+
+            # Clear progress
+            progress_bar.empty()
+            status_text.empty()
+
+
 # ============== MAIN APP ==============
 
 def main():
@@ -1017,6 +1451,9 @@ def main():
         st.session_state.analysis_results = None
     if 'pos_data' not in st.session_state:
         st.session_state.pos_data = None
+
+    # Initialize real-time mode session state
+    init_realtime_session_state()
 
     # Render header and sidebar
     render_header()
@@ -1050,106 +1487,45 @@ def main():
     with tab2:
         st.markdown('<div class="section-header">Video Analysis</div>', unsafe_allow_html=True)
 
-        # Video upload section
-        col1, col2 = st.columns([2, 1])
+        # Mode selector
+        st.markdown("### Select Analysis Mode")
+        mode_col1, mode_col2 = st.columns(2)
 
-        with col1:
-            st.markdown("### Upload Video")
-            uploaded_file = st.file_uploader(
-                "Choose a video file to analyze",
-                type=['mp4', 'avi', 'mov', 'mkv'],
-                help="Upload a video file to analyze for potential shoplifting behavior"
-            )
-
-            # Sample videos
-            st.markdown("**Or select a sample video:**")
-
-            sample_videos = []
-            training_normal = Path("data/training/normal")
-            training_shoplifting = Path("data/training/shoplifting")
-
-            if training_normal.exists():
-                normal_vids = list(training_normal.glob("*.mp4"))[:3]
-                sample_videos.extend([(v, "normal") for v in normal_vids])
-            if training_shoplifting.exists():
-                shoplifting_vids = list(training_shoplifting.glob("*.mp4"))[:3]
-                sample_videos.extend([(v, "shoplifting") for v in shoplifting_vids])
-
-            selected_sample = None
-            if sample_videos:
-                options = ["-- Select a sample --"] + [f"{v.name} ({label})" for v, label in sample_videos]
-                selected_option = st.selectbox("Sample videos", options, label_visibility="collapsed")
-                if selected_option != "-- Select a sample --":
-                    idx = options.index(selected_option) - 1
-                    selected_sample = sample_videos[idx][0]
-
-        with col2:
-            # Video preview
-            if uploaded_file:
-                st.markdown("### Preview")
-                st.video(uploaded_file)
-
-        st.markdown("---")
-
-        # POS Editor
-        pos_data = render_pos_editor()
-        if pos_data:
-            st.session_state.pos_data = pos_data
-
-        st.markdown("---")
-
-        # Analysis button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            analyze_clicked = st.button(
-                "🔍 Analyze Video",
-                type="primary",
+        with mode_col1:
+            if st.button(
+                "📹 Real-Time Camera",
+                type="primary" if st.session_state.video_mode == "realtime" else "secondary",
                 use_container_width=True,
-                disabled=(uploaded_file is None and selected_sample is None)
-            )
+                help="Connect to RTSP camera for live analysis"
+            ):
+                st.session_state.video_mode = "realtime"
+                st.rerun()
 
-        # Run analysis
-        if analyze_clicked:
-            video_path = None
+        with mode_col2:
+            if st.button(
+                "📁 Upload Video",
+                type="primary" if st.session_state.video_mode == "upload" else "secondary",
+                use_container_width=True,
+                help="Upload pre-recorded video for analysis"
+            ):
+                st.session_state.video_mode = "upload"
+                st.rerun()
 
-            if uploaded_file is not None:
-                # Save uploaded file temporarily
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    video_path = tmp_file.name
-            elif selected_sample is not None:
-                video_path = str(selected_sample)
+        st.markdown("---")
 
-            if video_path:
-                # Progress tracking
-                st.markdown("### Processing")
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+        # =====================================================================
+        # REAL-TIME MODE
+        # =====================================================================
+        if st.session_state.video_mode == "realtime":
+            render_realtime_mode()
 
-                def update_progress(progress, message):
-                    progress_bar.progress(progress)
-                    status_text.text(message)
+        # =====================================================================
+        # UPLOAD MODE (Original functionality)
+        # =====================================================================
+        else:
+            render_upload_mode()
 
-                # Run analysis
-                with st.spinner("Analyzing video..."):
-                    results = analyze_video(
-                        video_path,
-                        pos_data=st.session_state.pos_data,
-                        progress_callback=update_progress
-                    )
-
-                # Clean up temp file
-                if uploaded_file is not None and os.path.exists(video_path):
-                    os.unlink(video_path)
-
-                # Store results
-                st.session_state.analysis_results = results
-
-                # Clear progress
-                progress_bar.empty()
-                status_text.empty()
-
-        # Display results
+        # Display results (shared between modes)
         if st.session_state.analysis_results:
             st.markdown("---")
             render_analysis_results(st.session_state.analysis_results)

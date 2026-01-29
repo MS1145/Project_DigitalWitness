@@ -60,6 +60,7 @@ This document outlines the implementation plan for transforming Digital Witness 
 - [ ] Process frames at ≥15 FPS
 - [ ] Extract features incrementally (no batch processing)
 - [ ] Track pose IDs across frames
+
 - [ ] Handle frame drops gracefully
 
 ---

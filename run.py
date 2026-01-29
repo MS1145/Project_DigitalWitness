@@ -77,14 +77,14 @@ def run_training():
     """
     Execute the model training pipeline.
 
-    Delegates to train_video_classifier module which processes videos
+    Delegates to training module which processes videos
     from data/training/ and saves the trained model to models/.
     """
     print_banner()
     print("[MODE] Video-Based Model Training\n")
 
     # Lazy import to avoid loading ML dependencies until needed
-    from src.pose.train_video_classifier import main as train_main
+    from src.training import main as train_main
     result = train_main()
 
     if result.get('success'):
@@ -106,12 +106,11 @@ def run_analysis(video_path=None):
     print_banner()
     print("[MODE] Video Analysis (CLI)\n")
 
-    # Model bootstrap: train synthetic model if none exists
+    # Model bootstrap: train model if none exists
     if not BEHAVIOR_MODEL_PATH.exists():
-        print("[SETUP] No model found. Training synthetic model for demo...\n")
-        from src.pose.train_classifier import main as train_synthetic
-        train_synthetic()
-        print()
+        print("[SETUP] No model found. Please train the model first.\n")
+        print("Run: python run.py --train\n")
+        return
 
     # Auto-discover video file if not specified
     if video_path is None:

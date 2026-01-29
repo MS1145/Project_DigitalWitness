@@ -1,13 +1,14 @@
 """
 Digital Witness - Main Pipeline Orchestrator
 
-Core analysis pipeline that coordinates the 10-step processing flow:
+Core analysis pipeline that coordinates the processing flow:
 video → pose estimation → feature extraction → classification →
-POS cross-check → intent scoring → alert generation → case file output.
+POS cross-check → intent scoring → alert generation.
 
 This module is the primary interface for running end-to-end analysis.
 """
 import sys
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List
@@ -16,19 +17,13 @@ from .config import (
     DEFAULT_VIDEO_PATH,
     DEFAULT_POS_PATH,
     BEHAVIOR_MODEL_PATH,
-    OUTPUTS_DIR
+    OUTPUTS_DIR,
+    CASE_OUTPUT_DIR
 )
-from .video.loader import VideoLoader
-from .video.clip_extractor import ClipExtractor
-from .pose.estimator import PoseEstimator
-from .pose.feature_extractor import FeatureExtractor
-from .pose.behavior_classifier import BehaviorClassifier
-from .pos.data_loader import POSDataLoader
-from .pos.mock_generator import MockPOSGenerator
-from .analysis.cross_checker import CrossChecker, ProductInteraction
-from .analysis.intent_scorer import IntentScorer
-from .analysis.alert_generator import AlertGenerator
-from .output.case_builder import CaseBuilder
+from .video import VideoLoader, VideoMetadata, ClipExtractor
+from .pose import PoseEstimator, FeatureExtractor, BehaviorClassifier, BehaviorEvent
+from .pos import POSDataLoader, Transaction, TransactionItem
+from .analysis import CrossChecker, ProductInteraction, IntentScorer, AlertGenerator, Severity
 
 
 def run_pipeline(
@@ -37,13 +32,7 @@ def run_pipeline(
     product_mapping: Optional[Dict[float, str]] = None
 ) -> dict:
     """
-    Execute the complete 10-step analysis pipeline.
-
-    Pipeline stages:
-        1-4: Video processing (load, pose, features, classify)
-        5-6: POS correlation (load transactions, cross-check)
-        7-8: Risk assessment (intent score, alert generation)
-        9-10: Evidence packaging (clips, case file)
+    Execute the complete analysis pipeline.
 
     Args:
         video_path: Source video file path
@@ -58,14 +47,13 @@ def run_pipeline(
 
     print("=" * 60)
     print("  DIGITAL WITNESS - Retail Security Analysis")
-    print("  MVP Prototype")
     print("=" * 60)
     print()
 
     results = {}
 
     # Step 1: Load video
-    print("[1/10] Loading video...")
+    print("[1/8] Loading video...")
     try:
         video_loader = VideoLoader(video_path)
         metadata = video_loader.metadata
@@ -79,9 +67,8 @@ def run_pipeline(
         print("  ! Running in demo mode with simulated data...")
         return run_demo_mode(pos_path)
 
-    # Step 2: Run pose estimation using MediaPipe
-    # Process every 2nd frame (step=2) to balance accuracy vs performance
-    print("\n[2/10] Running pose estimation...")
+    # Step 2: Run pose estimation
+    print("\n[2/8] Running pose estimation...")
     pose_results = []
     with video_loader:
         with PoseEstimator() as estimator:
@@ -90,7 +77,6 @@ def run_pipeline(
                 result = estimator.process_frame(frame, frame_num, metadata.fps)
                 pose_results.append(result)
                 frame_count += 1
-
                 if frame_count % 50 == 0:
                     print(f"  - Processed {frame_count} frames...")
 
@@ -100,35 +86,31 @@ def run_pipeline(
     results["pose_results"] = pose_results
 
     # Step 3: Extract features
-    print("\n[3/10] Extracting features from pose sequences...")
+    print("\n[3/8] Extracting features from pose sequences...")
     feature_extractor = FeatureExtractor()
     pose_features = feature_extractor.extract_from_sequence(pose_results)
     print(f"  - Feature windows extracted: {len(pose_features)}")
     results["pose_features"] = pose_features
 
     # Step 4: Classify behaviors
-    print("\n[4/10] Classifying behaviors...")
+    print("\n[4/8] Classifying behaviors...")
     try:
         classifier = BehaviorClassifier()
         behavior_events = classifier.classify_sequence(pose_features)
-        behavior_events = classifier.merge_consecutive_events(behavior_events)
         print(f"  - Behavior events detected: {len(behavior_events)}")
-
-        # Count by type
-        for btype in ["normal", "pickup", "concealment", "bypass"]:
+        for btype in ["normal", "shoplifting"]:
             count = sum(1 for e in behavior_events if e.behavior_type == btype)
             if count > 0:
                 print(f"    - {btype}: {count}")
-
     except (FileNotFoundError, RuntimeError) as e:
         print(f"  ! Model not trained: {e}")
-        print("  ! Run 'python -m src.pose.train_classifier' first")
+        print("  ! Run 'python run.py --train' first")
         behavior_events = []
-
     results["behavior_events"] = behavior_events
 
     # Step 5: Load POS data
-    print("\n[5/10] Loading POS transaction data...")
+    print("\n[5/8] Loading POS transaction data...")
+    transactions = []
     try:
         pos_loader = POSDataLoader(pos_path)
         transactions = pos_loader.load()
@@ -137,105 +119,60 @@ def run_pipeline(
         print(f"  - Total items billed: {total_items}")
     except FileNotFoundError:
         print(f"  ! POS file not found: {pos_path}")
-        print("  ! Generating mock POS data...")
-        generator = MockPOSGenerator()
-        mock_data = generator.generate_scenario(
-            scenario_type="partial",
-            base_timestamp=datetime.now(),
-            video_duration=metadata.duration,
-            detected_items=["ITEM001", "ITEM002", "ITEM003"]
-        )
-        generator.save_to_file(mock_data)
-        pos_loader = POSDataLoader()
-        transactions = pos_loader.load()
-
+        print("  ! Using empty transaction list for analysis")
     results["transactions"] = transactions
 
-    # Step 6: Cross-check video-detected pickups vs POS billing
-    # This is the core fraud detection logic: items picked up but not paid
-    print("\n[6/10] Cross-checking detected interactions with billing...")
+    # Step 6: Cross-check
+    print("\n[6/8] Cross-checking detected interactions with billing...")
     cross_checker = CrossChecker()
-
-    # Map pickup events to product SKUs
-    # MVP limitation: relies on product_mapping or demo SKUs
     detected_interactions = []
-    if product_mapping:
-        for event in behavior_events:
-            if event.behavior_type == "pickup" and event.start_time in product_mapping:
-                interaction = ProductInteraction(
-                    sku=product_mapping[event.start_time],
-                    timestamp=event.start_time,
-                    interaction_type="pickup",
-                    confidence=event.confidence
-                )
-                detected_interactions.append(interaction)
-    else:
-        # Demo: simulate some detected products
-        demo_skus = ["ITEM001", "ITEM002", "ITEM003"]
-        for i, event in enumerate(behavior_events):
-            if event.behavior_type == "pickup" and i < len(demo_skus):
-                interaction = ProductInteraction(
-                    sku=demo_skus[i],
-                    timestamp=event.start_time,
-                    interaction_type="pickup",
-                    confidence=event.confidence
-                )
-                detected_interactions.append(interaction)
+    demo_skus = ["ITEM001", "ITEM002", "ITEM003"]
+    for i, event in enumerate(behavior_events):
+        if event.behavior_type in ["pickup", "shoplifting"] and i < len(demo_skus):
+            interaction = ProductInteraction(
+                sku=demo_skus[i],
+                timestamp=event.start_time,
+                interaction_type="pickup",
+                confidence=event.confidence
+            )
+            detected_interactions.append(interaction)
 
-    discrepancy_report = cross_checker.check_discrepancies(
-        detected_interactions,
-        transactions
-    )
+    discrepancy_report = cross_checker.check_discrepancies(detected_interactions, transactions)
     print(f"  - Items detected: {discrepancy_report.total_detected}")
     print(f"  - Items billed: {discrepancy_report.total_billed}")
     print(f"  - Discrepancies: {discrepancy_report.discrepancy_count}")
-    print(f"  - Match rate: {discrepancy_report.match_rate:.1%}")
     results["discrepancy_report"] = discrepancy_report
 
     # Step 7: Calculate intent score
-    print("\n[7/10] Calculating intent score...")
+    print("\n[7/8] Calculating intent score...")
     intent_scorer = IntentScorer()
-    intent_score = intent_scorer.calculate_score(
-        discrepancy_report,
-        behavior_events,
-        metadata.duration
-    )
+    intent_score = intent_scorer.calculate_score(discrepancy_report, behavior_events, metadata.duration)
     print(f"  - Intent score: {intent_score.score:.2f}")
     print(f"  - Severity: {intent_score.severity.value}")
     results["intent_score"] = intent_score
 
-    # Step 8: Generate alert if needed
-    print("\n[8/10] Checking alert conditions...")
+    # Step 8: Generate alert
+    print("\n[8/8] Checking alert conditions...")
     alert_generator = AlertGenerator()
 
-    # Get suspicious events for clip extraction
+    # Extract forensic clips for suspicious events
     suspicious_events = [
         {"timestamp": e.start_time, "type": e.behavior_type}
         for e in behavior_events
-        if e.behavior_type in ["concealment", "bypass", "pickup"]
+        if e.behavior_type in ["concealment", "bypass", "shoplifting"]
     ]
 
-    # Step 9: Extract forensic clips
-    print("\n[9/10] Extracting forensic video clips...")
     forensic_clips = []
     if suspicious_events:
-        with video_loader:
-            clip_extractor = ClipExtractor(video_loader)
-            forensic_clips = clip_extractor.extract_clips_for_events(
-                suspicious_events[:5]  # Limit to 5 clips
-            )
-        print(f"  - Clips extracted: {len(forensic_clips)}")
-    else:
-        print("  - No suspicious events to clip")
-    results["forensic_clips"] = forensic_clips
+        try:
+            with video_loader:
+                clip_extractor = ClipExtractor(video_loader)
+                forensic_clips = clip_extractor.extract_clips_for_events(suspicious_events[:5])
+            print(f"  - Clips extracted: {len(forensic_clips)}")
+        except Exception as e:
+            print(f"  - Clip extraction skipped: {e}")
 
-    # Generate alert
-    alert = alert_generator.generate_alert(
-        intent_score,
-        discrepancy_report,
-        behavior_events,
-        forensic_clips
-    )
+    alert = alert_generator.generate_alert(intent_score, discrepancy_report, behavior_events, forensic_clips)
     if alert:
         print(f"\n  *** ALERT GENERATED ***")
         print(f"  - Alert ID: {alert.alert_id}")
@@ -243,47 +180,27 @@ def run_pipeline(
     else:
         print("  - No alert generated (below threshold)")
     results["alert"] = alert
-
-    # Step 10: Build case file
-    print("\n[10/10] Building case file...")
-    case_builder = CaseBuilder()
-    case = case_builder.build_case(
-        video_metadata=metadata,
-        behavior_events=behavior_events,
-        discrepancy_report=discrepancy_report,
-        intent_score=intent_score,
-        alert=alert,
-        forensic_clips=forensic_clips
-    )
-    case_path = case_builder.save_case(case)
-    print(f"  - Case ID: {case.case_id}")
-    print(f"  - Saved to: {case_path}")
-    results["case"] = case
-    results["case_path"] = case_path
+    results["forensic_clips"] = forensic_clips
 
     # Final summary
     print("\n" + "=" * 60)
     print("  ANALYSIS COMPLETE")
     print("=" * 60)
-    print(case.summary)
-
+    print(f"\n  Risk Score: {intent_score.score:.2f} ({intent_score.severity.value})")
+    print(f"  Suspicious Events: {len([e for e in behavior_events if e.behavior_type != 'normal'])}")
+    print(f"  Billing Discrepancies: {discrepancy_report.discrepancy_count}")
     if alert:
-        print("\n" + alert_generator.format_for_display(alert))
+        print(f"\n  ALERT: {alert.alert_id}")
+        print(f"  {alert.explanation[:200]}...")
 
     return results
 
 
 def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
-    """
-    Run in demo mode without actual video file.
-    Uses simulated data to demonstrate the pipeline.
-    """
+    """Run in demo mode without actual video file."""
     print("\n" + "=" * 60)
     print("  DEMO MODE - Simulated Analysis")
     print("=" * 60)
-
-    from .pose.behavior_classifier import BehaviorEvent
-    from .video.loader import VideoMetadata
 
     # Simulate video metadata
     metadata = VideoMetadata(
@@ -298,90 +215,51 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
 
     # Simulate behavior events
     behavior_events = [
-        BehaviorEvent("normal", 0.0, 10.0, 0, 300, 0.9, {"normal": 0.9, "pickup": 0.05, "concealment": 0.03, "bypass": 0.02}),
-        BehaviorEvent("pickup", 10.0, 12.0, 300, 360, 0.85, {"normal": 0.1, "pickup": 0.85, "concealment": 0.03, "bypass": 0.02}),
-        BehaviorEvent("normal", 12.0, 25.0, 360, 750, 0.88, {"normal": 0.88, "pickup": 0.07, "concealment": 0.03, "bypass": 0.02}),
-        BehaviorEvent("pickup", 25.0, 27.0, 750, 810, 0.82, {"normal": 0.12, "pickup": 0.82, "concealment": 0.04, "bypass": 0.02}),
-        BehaviorEvent("concealment", 27.0, 30.0, 810, 900, 0.75, {"normal": 0.15, "pickup": 0.05, "concealment": 0.75, "bypass": 0.05}),
-        BehaviorEvent("normal", 30.0, 55.0, 900, 1650, 0.92, {"normal": 0.92, "pickup": 0.04, "concealment": 0.02, "bypass": 0.02}),
-        BehaviorEvent("bypass", 55.0, 60.0, 1650, 1800, 0.7, {"normal": 0.2, "pickup": 0.05, "concealment": 0.05, "bypass": 0.7}),
+        BehaviorEvent("normal", 0.0, 10.0, 0, 300, 0.9, {"normal": 0.9, "shoplifting": 0.1}),
+        BehaviorEvent("shoplifting", 10.0, 15.0, 300, 450, 0.85, {"normal": 0.15, "shoplifting": 0.85}),
+        BehaviorEvent("normal", 15.0, 50.0, 450, 1500, 0.92, {"normal": 0.92, "shoplifting": 0.08}),
+        BehaviorEvent("shoplifting", 50.0, 60.0, 1500, 1800, 0.78, {"normal": 0.22, "shoplifting": 0.78}),
     ]
 
-    # Load or generate POS data
-    print("\n[1/5] Loading POS data...")
+    # Load POS data
+    print("\n[1/4] Loading POS data...")
+    transactions = []
     try:
         pos_loader = POSDataLoader(pos_path or DEFAULT_POS_PATH)
         transactions = pos_loader.load()
+        print(f"  - Transactions: {len(transactions)}")
     except FileNotFoundError:
-        generator = MockPOSGenerator()
-        mock_data = generator.generate_scenario(
-            scenario_type="partial",
-            base_timestamp=datetime.now(),
-            video_duration=60.0,
-            detected_items=["ITEM001", "ITEM002", "ITEM003"]
-        )
-        generator.save_to_file(mock_data)
-        pos_loader = POSDataLoader()
-        transactions = pos_loader.load()
-
-    print(f"  - Transactions: {len(transactions)}")
+        print("  - No POS data found, using empty list")
 
     # Cross-check
-    print("\n[2/5] Cross-checking...")
+    print("\n[2/4] Cross-checking...")
     cross_checker = CrossChecker()
     detected_interactions = [
         ProductInteraction("ITEM001", 10.0, "pickup", 0.85),
-        ProductInteraction("ITEM002", 25.0, "pickup", 0.82),
-        ProductInteraction("ITEM003", 27.0, "pickup", 0.75),
+        ProductInteraction("ITEM002", 50.0, "pickup", 0.78),
     ]
-    discrepancy_report = cross_checker.check_discrepancies(
-        detected_interactions,
-        transactions
-    )
+    discrepancy_report = cross_checker.check_discrepancies(detected_interactions, transactions)
     print(f"  - Discrepancies: {discrepancy_report.discrepancy_count}")
 
     # Intent score
-    print("\n[3/5] Calculating intent score...")
+    print("\n[3/4] Calculating intent score...")
     intent_scorer = IntentScorer()
-    intent_score = intent_scorer.calculate_score(
-        discrepancy_report,
-        behavior_events,
-        60.0
-    )
+    intent_score = intent_scorer.calculate_score(discrepancy_report, behavior_events, 60.0)
     print(f"  - Score: {intent_score.score:.2f} ({intent_score.severity.value})")
 
     # Alert
-    print("\n[4/5] Generating alert...")
+    print("\n[4/4] Generating alert...")
     alert_generator = AlertGenerator()
-    alert = alert_generator.generate_alert(
-        intent_score,
-        discrepancy_report,
-        behavior_events,
-        []  # No clips in demo mode
-    )
-
-    # Case file
-    print("\n[5/5] Building case file...")
-    case_builder = CaseBuilder()
-    case = case_builder.build_case(
-        video_metadata=metadata,
-        behavior_events=behavior_events,
-        discrepancy_report=discrepancy_report,
-        intent_score=intent_score,
-        alert=alert,
-        forensic_clips=[]
-    )
-    case_path = case_builder.save_case(case)
-    print(f"  - Case saved: {case_path}")
+    alert = alert_generator.generate_alert(intent_score, discrepancy_report, behavior_events, [])
 
     # Summary
     print("\n" + "=" * 60)
     print("  DEMO ANALYSIS COMPLETE")
     print("=" * 60)
-    print(case.summary)
+    print(f"\n  Risk Score: {intent_score.score:.2f} ({intent_score.severity.value})")
 
     if alert:
-        print("\n" + alert_generator.format_for_display(alert))
+        print(f"\n  ALERT GENERATED: {alert.alert_id}")
 
     return {
         "video_metadata": metadata,
@@ -389,15 +267,12 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
         "transactions": transactions,
         "discrepancy_report": discrepancy_report,
         "intent_score": intent_score,
-        "alert": alert,
-        "case": case,
-        "case_path": case_path
+        "alert": alert
     }
 
 
 def main():
     """Main entry point."""
-    # Check for command line arguments
     video_path = None
     pos_path = None
 
