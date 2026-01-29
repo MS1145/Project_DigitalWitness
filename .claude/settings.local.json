@@ -9,7 +9,8 @@
       "Bash(powershell -Command \"if \\(Test-Path ''nul''\\) { Remove-Item ''nul'' -Force; Write-Host ''Deleted nul file'' } else { Write-Host ''nul file not found'' }\")",
       "Bash(powershell -Command \"Get-ChildItem -Force | Select-Object Name, Mode\")",
       "Bash(dir:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(ls:*)"
     ]
   }
 }

@@ -17,47 +17,46 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### Run Analysis (Command Line)
+### Unified Entry Point (`run.py`)
+
+All commands go through `run.py`:
+
 ```bash
-python run.py                        # Demo mode or auto-detect video in data/videos/
-python run.py path/to/video.mp4      # Analyze specific video
+python run.py --ui               # Launch web interface (recommended)
+python run.py --train            # Train model on video dataset
+python run.py                    # CLI demo mode
+python run.py path/to/video.mp4  # Analyze specific video (CLI)
+python run.py --help             # Show help
 ```
 
-### Run Demo UI (Web Interface - Recommended for Demos)
+### Web Interface (Recommended)
 ```bash
-python demo.py                       # Launch web UI (opens browser)
-streamlit run app.py                 # Alternative: direct Streamlit command
+python run.py --ui
 ```
 
-The web UI provides:
+Opens Streamlit dashboard at `http://localhost:8501` with:
 - Video upload interface
 - Real-time processing progress
 - Visual results display (charts, timelines)
 - Risk level alerts with explanations
 
-### Train Behavior Classifier (Video-Based - Recommended)
+### Train Model
 ```bash
-python train.py                      # Train on real video dataset
-python run.py --train                # Alternative: train via run.py
+python run.py --train
 ```
 
-The video-based training:
+Training process:
 - Processes videos from `data/training/normal/` and `data/training/shoplifting/`
 - Extracts pose features using MediaPipe
 - Trains a Random Forest classifier (binary: normal vs shoplifting)
 - Generates confusion matrix and feature importance visualizations
 - Saves model to `models/behavior_classifier.pkl`
 
-### Train Behavior Classifier (Synthetic Data - Legacy)
-```bash
-python -m src.pose.train_classifier
-```
-Note: Uses synthetic (fake) data for demonstration only.
-
-### Run Modules Directly
+### Direct Module Access (Advanced)
 ```bash
 python -m src.main                          # Main pipeline
-python -m src.main video.mp4 transactions.json  # With specific files
+python -m src.pose.train_classifier         # Synthetic data training (fallback)
+streamlit run app.py                        # Direct Streamlit
 ```
 
 ## Architecture
