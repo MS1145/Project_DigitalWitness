@@ -1,5 +1,9 @@
 """
-Cross-checker module for comparing detected interactions with POS data.
+Cross-checker module for video-to-POS reconciliation.
+
+Compares products detected via video analysis (pickups) against
+items actually billed in POS transactions. The discrepancy between
+these sets is a primary indicator of potential shoplifting.
 """
 from dataclasses import dataclass
 from typing import List, Dict, Set
@@ -10,27 +14,32 @@ from ..pos.data_loader import Transaction
 
 @dataclass
 class ProductInteraction:
-    """A detected product interaction from video analysis."""
-    sku: str
-    timestamp: float
-    interaction_type: str  # "pickup", "return", etc.
-    confidence: float
+    """A product pickup detected from video analysis."""
+    sku: str                  # Product identifier
+    timestamp: float          # When the pickup occurred
+    interaction_type: str     # "pickup", "return", etc.
+    confidence: float         # Detection confidence
 
 
 @dataclass
 class DiscrepancyReport:
-    """Report of discrepancies between detected and billed items."""
-    missing_from_billing: List[str]  # SKUs picked up but not billed
-    extra_in_billing: List[str]  # SKUs billed but not seen picked up
-    matched_items: List[str]  # SKUs that match
+    """
+    Reconciliation result between video and POS data.
+
+    Key metric: missing_from_billing indicates items picked up
+    but not paid for - the core shoplifting indicator.
+    """
+    missing_from_billing: List[str]  # Picked up but not billed (suspicious)
+    extra_in_billing: List[str]      # Billed but not seen (camera blind spot)
+    matched_items: List[str]         # Successfully reconciled
     total_detected: int
     total_billed: int
-    discrepancy_count: int
-    match_rate: float  # 0.0 to 1.0
+    discrepancy_count: int           # len(missing_from_billing)
+    match_rate: float                # Fraction of detected items that were billed
 
 
 class CrossChecker:
-    """Compares detected product interactions with POS transactions."""
+    """Reconciles video-detected product interactions with POS billing."""
 
     def __init__(self):
         """Initialize cross-checker."""
@@ -42,22 +51,17 @@ class CrossChecker:
         transactions: List[Transaction]
     ) -> DiscrepancyReport:
         """
-        Compare detected product interactions with billed items.
+        Perform set-based reconciliation between video and POS.
 
-        Args:
-            detected_interactions: List of detected product interactions
-            transactions: List of POS transactions
-
-        Returns:
-            DiscrepancyReport with comparison results
+        Uses set operations to find:
+        - detected - billed = missing (potential theft)
+        - billed - detected = extra (camera missed it)
+        - detected & billed = matched (normal purchase)
         """
-        # Get unique SKUs from detected pickups
         detected_skus = self._get_detected_pickup_skus(detected_interactions)
-
-        # Get billed SKUs from transactions
         billed_skus = self._get_billed_skus(transactions)
 
-        # Find discrepancies
+        # Set operations for reconciliation
         missing_from_billing = list(detected_skus - billed_skus)
         extra_in_billing = list(billed_skus - detected_skus)
         matched_items = list(detected_skus & billed_skus)

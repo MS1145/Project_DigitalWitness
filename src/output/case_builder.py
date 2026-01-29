@@ -1,6 +1,9 @@
 """
 Case builder module for Digital Witness.
-Compiles all evidence and analysis into a case file for audit.
+
+Compiles all analysis artifacts into a JSON case file that serves
+as a complete audit trail. Each case file is self-contained and
+includes all evidence needed to review and validate the analysis.
 """
 import json
 from datetime import datetime
@@ -19,20 +22,26 @@ from ..config import CASE_OUTPUT_DIR
 
 @dataclass
 class CaseFile:
-    """Complete case file for audit trail."""
+    """
+    Complete audit record for a single analysis run.
+
+    Serializable to JSON for storage and later review.
+    Includes full provenance: source video, all detections,
+    scoring breakdown, and generated alerts.
+    """
     case_id: str
     created_at: str
     video_metadata: Dict[str, Any]
-    behavior_timeline: List[Dict[str, Any]]
+    behavior_timeline: List[Dict[str, Any]]  # Chronological behavior events
     discrepancy_report: Dict[str, Any]
     intent_score: Dict[str, Any]
-    alert: Optional[Dict[str, Any]]
+    alert: Optional[Dict[str, Any]]          # None if no alert triggered
     forensic_clips: List[Dict[str, Any]]
-    summary: str
+    summary: str                             # Human-readable summary
 
 
 class CaseBuilder:
-    """Builds comprehensive case files for audit."""
+    """Assembles and persists case files from analysis results."""
 
     def __init__(self, output_dir: Optional[Path] = None):
         """

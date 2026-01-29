@@ -1,5 +1,9 @@
 """
 Feature extraction from pose sequences for ML classification.
+
+Transforms raw pose landmark sequences into a fixed-size feature vector
+suitable for sklearn classifiers. Uses sliding windows to capture temporal
+patterns in body movement.
 """
 import numpy as np
 from typing import List, Optional
@@ -11,34 +15,35 @@ from ..config import SLIDING_WINDOW_SIZE, SLIDING_WINDOW_STRIDE
 
 @dataclass
 class PoseFeatures:
-    """Extracted features from a pose sequence window."""
+    """Feature vector extracted from a temporal window of pose frames."""
     window_start_frame: int
     window_end_frame: int
     window_start_time: float
     window_end_time: float
-    features: np.ndarray  # Feature vector
-    feature_names: List[str]
+    features: np.ndarray       # Shape: (21,) - the feature vector
+    feature_names: List[str]   # Human-readable feature labels
 
 
 class FeatureExtractor:
-    """Extracts ML features from pose sequences."""
+    """
+    Converts pose sequences to ML feature vectors.
+
+    Uses a sliding window approach to extract 21 features capturing:
+    - Hand velocity and trajectory
+    - Hand-to-body proximity (concealment indicator)
+    - Arm joint angles
+    - Body movement patterns
+    """
 
     def __init__(
         self,
         window_size: int = SLIDING_WINDOW_SIZE,
         window_stride: int = SLIDING_WINDOW_STRIDE
     ):
-        """
-        Initialize feature extractor.
-
-        Args:
-            window_size: Number of frames per sliding window
-            window_stride: Step size between windows
-        """
         self.window_size = window_size
         self.window_stride = window_stride
 
-        # Feature names for interpretability
+        # Feature names enable model interpretability and debugging
         self.feature_names = [
             # Hand velocities (4 features)
             "left_hand_velocity_mean",
@@ -217,27 +222,24 @@ class FeatureExtractor:
         )
 
     def _calculate_velocities(self, positions: np.ndarray) -> np.ndarray:
-        """Calculate velocities from position sequence."""
+        """Compute frame-to-frame velocity magnitudes from position sequence."""
         if len(positions) < 2:
             return np.array([])
         deltas = np.diff(positions, axis=0)
         velocities = np.linalg.norm(deltas, axis=1)
         return velocities
 
-    def _calculate_angle(
-        self,
-        p1: tuple,
-        p2: tuple,
-        p3: tuple
-    ) -> float:
+    def _calculate_angle(self, p1: tuple, p2: tuple, p3: tuple) -> float:
         """
-        Calculate angle at p2 formed by p1-p2-p3.
+        Compute joint angle at p2 using vector math.
 
-        Returns angle in degrees.
+        Used for elbow angle calculation which helps detect concealment
+        (bent arm bringing item close to body).
         """
         v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])
         v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
 
+        # Epsilon prevents division by zero for degenerate poses
         cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-8)
         cos_angle = np.clip(cos_angle, -1, 1)
         angle = np.arccos(cos_angle)

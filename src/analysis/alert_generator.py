@@ -1,5 +1,12 @@
 """
 Alert generation module for Digital Witness.
+
+Creates human-reviewable alerts when intent score exceeds threshold.
+Each alert packages together all evidence needed for an operator
+to make an informed decision.
+
+Key design principle: requires_human_review is always True.
+This system provides advisory information only.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,16 +22,21 @@ from ..config import ALERT_THRESHOLD
 
 @dataclass
 class Alert:
-    """A generated alert for human review."""
+    """
+    Packaged alert for human operator review.
+
+    Contains all evidence (clips, summaries, explanations) needed
+    for an operator to validate or dismiss the alert.
+    """
     alert_id: str
     timestamp: datetime
     severity: Severity
     intent_score: float
-    explanation: str
+    explanation: str                   # Detailed reasoning
     evidence_clips: List[ExtractedClip]
     discrepancy_summary: str
     behavior_summary: str
-    requires_human_review: bool = True
+    requires_human_review: bool = True  # Always True - system is advisory only
 
     def to_dict(self) -> dict:
         """Convert alert to dictionary for serialization."""

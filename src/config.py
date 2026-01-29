@@ -1,9 +1,15 @@
 """
-Configuration constants for Digital Witness system.
+Central configuration for Digital Witness system.
+
+All tunable parameters and paths are defined here to ensure consistency
+across modules and to facilitate hyperparameter adjustment.
 """
 from pathlib import Path
 
-# Base paths
+# ============================================================================
+# PATH CONFIGURATION
+# ============================================================================
+
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 MODELS_DIR = PROJECT_ROOT / "models"
@@ -25,30 +31,44 @@ TRAINING_SHOPLIFTING_DIR = TRAINING_DATA_DIR / "shoplifting"
 # Model paths
 BEHAVIOR_MODEL_PATH = MODELS_DIR / "behavior_classifier.pkl"
 
-# MediaPipe configuration
-POSE_MIN_DETECTION_CONFIDENCE = 0.5
-POSE_MIN_TRACKING_CONFIDENCE = 0.5
+# ============================================================================
+# POSE ESTIMATION (MediaPipe)
+# ============================================================================
 
-# Feature extraction configuration
-SLIDING_WINDOW_SIZE = 30  # frames
-SLIDING_WINDOW_STRIDE = 15  # frames
+POSE_MIN_DETECTION_CONFIDENCE = 0.5  # Minimum confidence to detect a pose
+POSE_MIN_TRACKING_CONFIDENCE = 0.5   # Minimum confidence to track between frames
 
-# Behavior classes
+# ============================================================================
+# FEATURE EXTRACTION
+# ============================================================================
+
+SLIDING_WINDOW_SIZE = 30   # Frames per feature window (~1 sec at 30fps)
+SLIDING_WINDOW_STRIDE = 15 # Overlap between windows (50% overlap)
+
+# ============================================================================
+# BEHAVIOR CLASSIFICATION
+# ============================================================================
+
+# Classes the ML model can predict (order matters for label encoding)
 BEHAVIOR_CLASSES = ["normal", "pickup", "concealment", "bypass"]
 
-# Intent scoring thresholds
+# ============================================================================
+# INTENT SCORING
+# ============================================================================
+
+# Severity thresholds (score ranges)
 INTENT_THRESHOLD_LOW = 0.3
 INTENT_THRESHOLD_MEDIUM = 0.5
 INTENT_THRESHOLD_HIGH = 0.7
 INTENT_THRESHOLD_CRITICAL = 0.85
 
-# Intent scoring weights
-WEIGHT_DISCREPANCY = 0.4
-WEIGHT_CONCEALMENT = 0.3
-WEIGHT_BYPASS = 0.2
-WEIGHT_DURATION = 0.1
+# Component weights for weighted sum (must sum to 1.0)
+WEIGHT_DISCREPANCY = 0.4   # POS mismatch is strongest signal
+WEIGHT_CONCEALMENT = 0.3   # Hiding behavior
+WEIGHT_BYPASS = 0.2        # Avoiding checkout
+WEIGHT_DURATION = 0.1      # Time spent in suspicious state
 
-# Severity levels
+# Score-to-severity mapping (min, max) ranges
 SEVERITY_LEVELS = {
     "LOW": (0.0, INTENT_THRESHOLD_LOW),
     "MEDIUM": (INTENT_THRESHOLD_LOW, INTENT_THRESHOLD_MEDIUM),
@@ -56,13 +76,23 @@ SEVERITY_LEVELS = {
     "CRITICAL": (INTENT_THRESHOLD_HIGH, 1.0)
 }
 
-# Clip extraction configuration
-CLIP_BUFFER_BEFORE = 3.0  # seconds before event
-CLIP_BUFFER_AFTER = 3.0   # seconds after event
+# ============================================================================
+# FORENSIC CLIP EXTRACTION
+# ============================================================================
+
+CLIP_BUFFER_BEFORE = 3.0  # Seconds of context before event
+CLIP_BUFFER_AFTER = 3.0   # Seconds of context after event
 CLIP_OUTPUT_DIR = OUTPUTS_DIR / "clips"
 
-# Alert configuration
-ALERT_THRESHOLD = INTENT_THRESHOLD_MEDIUM  # Generate alert if score >= this
+# ============================================================================
+# ALERT GENERATION
+# ============================================================================
 
-# Output configuration
+# Minimum intent score required to trigger an alert
+ALERT_THRESHOLD = INTENT_THRESHOLD_MEDIUM
+
+# ============================================================================
+# OUTPUT PATHS
+# ============================================================================
+
 CASE_OUTPUT_DIR = OUTPUTS_DIR / "cases"

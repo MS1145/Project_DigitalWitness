@@ -1,5 +1,9 @@
 """
 ML-based behavior classification for Digital Witness.
+
+Uses a RandomForest classifier trained on pose features to detect
+four behavior types: normal shopping, product pickup, concealment,
+and checkout bypass.
 """
 import numpy as np
 import joblib
@@ -15,18 +19,28 @@ from ..config import BEHAVIOR_CLASSES, BEHAVIOR_MODEL_PATH
 
 @dataclass
 class BehaviorEvent:
-    """A detected behavior event."""
-    behavior_type: str  # "normal", "pickup", "concealment", "bypass"
-    start_time: float
-    end_time: float
+    """
+    A classified behavior segment with temporal bounds.
+
+    The probabilities dict provides explainability by showing
+    the model's confidence distribution across all classes.
+    """
+    behavior_type: str         # Predicted class label
+    start_time: float          # Segment start (seconds)
+    end_time: float            # Segment end (seconds)
     start_frame: int
     end_frame: int
-    confidence: float
-    probabilities: Dict[str, float]  # Probability for each class
+    confidence: float          # Max probability (prediction confidence)
+    probabilities: Dict[str, float]  # Per-class probabilities
 
 
 class BehaviorClassifier:
-    """ML classifier for detecting shopping behaviors."""
+    """
+    RandomForest-based behavior classifier.
+
+    Supports training, prediction, and model persistence.
+    Uses StandardScaler for feature normalization.
+    """
 
     def __init__(self, model_path: Optional[Path] = None):
         """
@@ -55,32 +69,24 @@ class BehaviorClassifier:
         random_state: int = 42
     ) -> Dict[str, float]:
         """
-        Train the behavior classifier.
+        Train the RandomForest classifier on labeled features.
 
-        Args:
-            features: Training features (n_samples, n_features)
-            labels: Training labels (n_samples,) as class indices
-            n_estimators: Number of trees in random forest
-            max_depth: Maximum tree depth
-            random_state: Random seed for reproducibility
-
-        Returns:
-            Dictionary with training metrics
+        Uses balanced class weights to handle the typical imbalance where
+        'normal' behavior dominates the training data.
         """
-        # Normalize features
+        # Z-score normalization: critical for consistent predictions
         self.scaler = StandardScaler()
         features_normalized = self.scaler.fit_transform(features)
 
-        # Store normalization parameters
         self.feature_mean = self.scaler.mean_
         self.feature_std = self.scaler.scale_
 
-        # Train model
+        # RandomForest with balanced weights compensates for class imbalance
         self.model = RandomForestClassifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=random_state,
-            class_weight='balanced'  # Handle class imbalance
+            class_weight='balanced'
         )
         self.model.fit(features_normalized, labels)
 
@@ -175,19 +181,15 @@ class BehaviorClassifier:
         min_confidence: float = 0.5
     ) -> List[BehaviorEvent]:
         """
-        Merge consecutive events of the same type.
+        Consolidate consecutive same-type events into single segments.
 
-        Args:
-            events: List of BehaviorEvent objects
-            min_confidence: Minimum confidence to include event
-
-        Returns:
-            List of merged BehaviorEvent objects
+        This reduces noise from frame-by-frame classification by merging
+        adjacent windows with the same prediction into continuous events.
         """
         if not events:
             return []
 
-        # Filter by confidence
+        # Filter low-confidence predictions to reduce false positives
         filtered = [e for e in events if e.confidence >= min_confidence]
         if not filtered:
             return []

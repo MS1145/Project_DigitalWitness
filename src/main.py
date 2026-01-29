@@ -1,20 +1,11 @@
 """
-Digital Witness - Main Orchestration Script
+Digital Witness - Main Pipeline Orchestrator
 
-Bias-Aware, Explainable Retail Security Assistant
-MVP Prototype for IPD
+Core analysis pipeline that coordinates the 10-step processing flow:
+video → pose estimation → feature extraction → classification →
+POS cross-check → intent scoring → alert generation → case file output.
 
-This script runs the complete analysis pipeline:
-1. Load video and extract frames
-2. Run pose estimation on frames
-3. Extract features from pose sequences
-4. Classify behaviors using ML model
-5. Load POS transaction data
-6. Cross-check detected interactions vs billing
-7. Calculate intent score
-8. Generate alert if threshold exceeded
-9. Extract forensic video clips
-10. Build and save case file
+This module is the primary interface for running end-to-end analysis.
 """
 import sys
 from pathlib import Path
@@ -46,15 +37,21 @@ def run_pipeline(
     product_mapping: Optional[Dict[float, str]] = None
 ) -> dict:
     """
-    Run the complete Digital Witness analysis pipeline.
+    Execute the complete 10-step analysis pipeline.
+
+    Pipeline stages:
+        1-4: Video processing (load, pose, features, classify)
+        5-6: POS correlation (load transactions, cross-check)
+        7-8: Risk assessment (intent score, alert generation)
+        9-10: Evidence packaging (clips, case file)
 
     Args:
-        video_path: Path to video file, or None for default
-        pos_path: Path to POS JSON file, or None for default
-        product_mapping: Dict mapping timestamps to product SKUs for cross-checking
+        video_path: Source video file path
+        pos_path: POS transaction JSON file path
+        product_mapping: Timestamp-to-SKU mapping for cross-checking
 
     Returns:
-        Dictionary with analysis results
+        Dict containing all intermediate and final results
     """
     video_path = video_path or DEFAULT_VIDEO_PATH
     pos_path = pos_path or DEFAULT_POS_PATH
@@ -82,13 +79,14 @@ def run_pipeline(
         print("  ! Running in demo mode with simulated data...")
         return run_demo_mode(pos_path)
 
-    # Step 2: Run pose estimation
+    # Step 2: Run pose estimation using MediaPipe
+    # Process every 2nd frame (step=2) to balance accuracy vs performance
     print("\n[2/10] Running pose estimation...")
     pose_results = []
     with video_loader:
         with PoseEstimator() as estimator:
             frame_count = 0
-            for frame_num, frame in video_loader.frames(step=2):  # Process every 2nd frame
+            for frame_num, frame in video_loader.frames(step=2):
                 result = estimator.process_frame(frame, frame_num, metadata.fps)
                 pose_results.append(result)
                 frame_count += 1
@@ -153,12 +151,13 @@ def run_pipeline(
 
     results["transactions"] = transactions
 
-    # Step 6: Cross-check interactions vs billing
+    # Step 6: Cross-check video-detected pickups vs POS billing
+    # This is the core fraud detection logic: items picked up but not paid
     print("\n[6/10] Cross-checking detected interactions with billing...")
     cross_checker = CrossChecker()
 
-    # Create product interactions from behavior events
-    # In MVP, we simulate detected products based on pickup events
+    # Map pickup events to product SKUs
+    # MVP limitation: relies on product_mapping or demo SKUs
     detected_interactions = []
     if product_mapping:
         for event in behavior_events:

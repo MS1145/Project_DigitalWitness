@@ -1,5 +1,8 @@
 """
 Video loading utilities for Digital Witness.
+
+Provides a context-managed interface to OpenCV video capture,
+with support for random access, iteration, and metadata extraction.
 """
 import cv2
 import numpy as np
@@ -10,18 +13,25 @@ from typing import Iterator, Optional, Tuple
 
 @dataclass
 class VideoMetadata:
-    """Metadata extracted from a video file."""
+    """Video file properties extracted via OpenCV."""
     path: Path
     fps: float
     frame_count: int
-    duration: float  # seconds
+    duration: float    # Total duration in seconds
     width: int
     height: int
-    codec: str
+    codec: str         # FourCC codec identifier
 
 
 class VideoLoader:
-    """Loads and iterates through video frames."""
+    """
+    OpenCV-based video reader with context manager support.
+
+    Usage:
+        with VideoLoader("video.mp4") as loader:
+            for frame_num, frame in loader.frames(step=2):
+                process(frame)
+    """
 
     def __init__(self, video_path: str | Path):
         """
@@ -45,7 +55,12 @@ class VideoLoader:
         return self._metadata
 
     def _load_metadata(self) -> VideoMetadata:
-        """Load metadata from video file."""
+        """
+        Extract video properties using OpenCV.
+
+        Opens a temporary capture just to read metadata, then releases it.
+        The actual capture for frame reading is managed separately.
+        """
         cap = cv2.VideoCapture(str(self.path))
         if not cap.isOpened():
             raise ValueError(f"Could not open video file: {self.path}")
@@ -55,6 +70,7 @@ class VideoLoader:
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # Decode FourCC: 4-byte int -> 4 ASCII chars
             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
             codec = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)])
 

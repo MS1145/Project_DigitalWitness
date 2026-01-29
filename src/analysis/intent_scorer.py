@@ -1,5 +1,11 @@
 """
 Intent scoring module for Digital Witness.
+
+Computes a weighted risk score (0.0-1.0) from multiple evidence sources:
+POS discrepancies, concealment behaviors, checkout bypass, and duration.
+
+The score is NOT a guilt determination - it's a prioritization metric
+for human review. All weights are configurable in config.py.
 """
 from dataclasses import dataclass
 from typing import List, Optional
@@ -20,7 +26,7 @@ from ..config import (
 
 
 class Severity(Enum):
-    """Alert severity levels."""
+    """Severity tiers for alert prioritization."""
     NONE = "NONE"
     LOW = "LOW"
     MEDIUM = "MEDIUM"
@@ -30,15 +36,25 @@ class Severity(Enum):
 
 @dataclass
 class IntentScore:
-    """Intent assessment result."""
-    score: float  # 0.0 to 1.0
-    severity: Severity
-    components: dict  # Breakdown of score components
-    explanation: str
+    """
+    Composite risk assessment result.
+
+    The components dict provides transparency into how the score
+    was computed, enabling operators to understand the reasoning.
+    """
+    score: float           # Weighted sum, range [0.0, 1.0]
+    severity: Severity     # Derived from score thresholds
+    components: dict       # Per-factor breakdown for explainability
+    explanation: str       # Human-readable summary
 
 
 class IntentScorer:
-    """Calculates intent scores based on behavioral and transactional evidence."""
+    """
+    Multi-factor risk scoring engine.
+
+    Combines evidence from video analysis (behaviors) and POS data
+    (discrepancies) into a single normalized score.
+    """
 
     def __init__(
         self,
@@ -143,68 +159,68 @@ class IntentScorer:
         )
 
     def _score_discrepancy(self, report: DiscrepancyReport) -> float:
-        """Score based on POS discrepancies."""
+        """
+        Score from POS mismatches (strongest signal).
+
+        Items picked up but not billed are the primary indicator.
+        Scale factor of 1.5 means 67% unbilled items = max score.
+        """
         if report.total_detected == 0:
             return 0.0
-
-        # Score based on number of missing items relative to total
         missing_ratio = report.discrepancy_count / report.total_detected
-        return min(1.0, missing_ratio * 1.5)  # Scale up slightly
+        return min(1.0, missing_ratio * 1.5)
 
     def _score_concealment(self, events: List[BehaviorEvent]) -> float:
-        """Score based on concealment behaviors."""
-        concealment_events = [
-            e for e in events
-            if e.behavior_type == "concealment"
-        ]
+        """
+        Score from concealment behaviors (hiding items on person).
+
+        Factors in both count and confidence. Maxes out at 3 events
+        to avoid over-weighting repeated low-confidence detections.
+        """
+        concealment_events = [e for e in events if e.behavior_type == "concealment"]
 
         if not concealment_events:
             return 0.0
 
-        # Score based on number and confidence of concealment events
         avg_confidence = sum(e.confidence for e in concealment_events) / len(concealment_events)
-        count_factor = min(1.0, len(concealment_events) / 3)  # Max out at 3 events
+        count_factor = min(1.0, len(concealment_events) / 3)
 
         return avg_confidence * count_factor
 
     def _score_bypass(self, events: List[BehaviorEvent]) -> float:
-        """Score based on checkout bypass behaviors."""
-        bypass_events = [
-            e for e in events
-            if e.behavior_type == "bypass"
-        ]
+        """
+        Score from checkout bypass detection.
+
+        Uses max confidence rather than average since a single high-confidence
+        bypass is more significant than multiple uncertain ones.
+        """
+        bypass_events = [e for e in events if e.behavior_type == "bypass"]
 
         if not bypass_events:
             return 0.0
 
-        # Score based on confidence of bypass events
-        max_confidence = max(e.confidence for e in bypass_events)
-        return max_confidence
+        return max(e.confidence for e in bypass_events)
 
     def _score_duration(
         self,
         events: List[BehaviorEvent],
         video_duration: float
     ) -> float:
-        """Score based on duration of suspicious behavior."""
+        """
+        Score from time spent in suspicious states.
+
+        Longer durations of concealment/bypass increase risk score.
+        Scale factor of 3 means ~33% suspicious time = max score.
+        """
         suspicious_types = {"concealment", "bypass"}
-        suspicious_events = [
-            e for e in events
-            if e.behavior_type in suspicious_types
-        ]
+        suspicious_events = [e for e in events if e.behavior_type in suspicious_types]
 
         if not suspicious_events or video_duration <= 0:
             return 0.0
 
-        # Calculate total suspicious duration
-        suspicious_duration = sum(
-            e.end_time - e.start_time
-            for e in suspicious_events
-        )
-
-        # Score based on ratio of suspicious to total duration
+        suspicious_duration = sum(e.end_time - e.start_time for e in suspicious_events)
         ratio = suspicious_duration / video_duration
-        return min(1.0, ratio * 3)  # Scale up
+        return min(1.0, ratio * 3)
 
     def _determine_severity(self, score: float) -> Severity:
         """Determine severity level from score."""

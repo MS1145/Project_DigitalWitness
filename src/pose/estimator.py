@@ -1,5 +1,9 @@
 """
 Pose estimation using MediaPipe for Digital Witness.
+
+Wraps MediaPipe's pose solution to extract 33 body landmarks per frame.
+We focus on upper body landmarks (shoulders, elbows, wrists, hips)
+which are most relevant for detecting shopping behaviors.
 """
 import numpy as np
 import mediapipe as mp
@@ -10,44 +14,50 @@ from ..config import POSE_MIN_DETECTION_CONFIDENCE, POSE_MIN_TRACKING_CONFIDENCE
 
 @dataclass
 class PoseLandmark:
-    """A single pose landmark."""
-    x: float  # Normalized x coordinate (0-1)
-    y: float  # Normalized y coordinate (0-1)
-    z: float  # Depth relative to hips
-    visibility: float  # Confidence that landmark is visible
+    """Single body landmark with 3D position and visibility."""
+    x: float           # Normalized x (0-1, left to right)
+    y: float           # Normalized y (0-1, top to bottom)
+    z: float           # Depth relative to hip midpoint
+    visibility: float  # Landmark visibility confidence
 
 
 @dataclass
 class PoseResult:
-    """Result of pose estimation for a single frame."""
+    """Pose estimation output for a single video frame."""
     frame_number: int
-    timestamp: float  # seconds
-    landmarks: Optional[Dict[str, PoseLandmark]]  # None if no pose detected
-    raw_landmarks: Optional[Any]  # Original MediaPipe landmarks
+    timestamp: float                                  # Frame time in seconds
+    landmarks: Optional[Dict[str, PoseLandmark]]      # Named landmarks dict
+    raw_landmarks: Optional[Any]                      # MediaPipe native format
 
 
-# MediaPipe landmark indices for key body parts
+# MediaPipe landmark indices we use for behavior analysis
+# Full pose has 33 landmarks; we extract only upper body for efficiency
 LANDMARK_NAMES = {
     0: "nose",
     11: "left_shoulder",
     12: "right_shoulder",
     13: "left_elbow",
     14: "right_elbow",
-    15: "left_wrist",
-    16: "right_wrist",
+    15: "left_wrist",        # Key for hand tracking
+    16: "right_wrist",       # Key for hand tracking
     17: "left_pinky",
     18: "right_pinky",
     19: "left_index",
     20: "right_index",
     21: "left_thumb",
     22: "right_thumb",
-    23: "left_hip",
-    24: "right_hip",
+    23: "left_hip",          # Body center reference
+    24: "right_hip",         # Body center reference
 }
 
 
 class PoseEstimator:
-    """Estimates human pose from video frames using MediaPipe."""
+    """
+    MediaPipe pose estimation wrapper with context manager support.
+
+    Detects human body pose in video frames and extracts landmarks
+    for downstream behavior classification.
+    """
 
     def __init__(
         self,
@@ -56,12 +66,10 @@ class PoseEstimator:
         static_image_mode: bool = False
     ):
         """
-        Initialize pose estimator.
+        Initialize MediaPipe Pose solution.
 
-        Args:
-            min_detection_confidence: Minimum confidence for detection
-            min_tracking_confidence: Minimum confidence for tracking
-            static_image_mode: If True, treats each image independently
+        static_image_mode=False enables tracking optimization for video,
+        where pose from previous frame helps locate pose in current frame.
         """
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
@@ -77,20 +85,13 @@ class PoseEstimator:
         fps: float
     ) -> PoseResult:
         """
-        Process a single frame and extract pose landmarks.
+        Run pose detection on a single frame.
 
-        Args:
-            frame: BGR image as numpy array
-            frame_number: Frame index
-            fps: Video frames per second
-
-        Returns:
-            PoseResult with extracted landmarks
+        Returns PoseResult with landmarks=None if no person detected.
         """
-        # Convert BGR to RGB for MediaPipe
+        # MediaPipe expects RGB; OpenCV provides BGR
         rgb_frame = frame[:, :, ::-1]
 
-        # Process frame
         results = self.pose.process(rgb_frame)
 
         # Extract landmarks if detected

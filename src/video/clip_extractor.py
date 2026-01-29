@@ -1,5 +1,8 @@
 """
 Forensic clip extraction for Digital Witness.
+
+Extracts short video segments around suspicious events for human review.
+Clips include configurable context buffer before/after the event.
 """
 import cv2
 from pathlib import Path
@@ -12,16 +15,21 @@ from ..config import CLIP_BUFFER_BEFORE, CLIP_BUFFER_AFTER, CLIP_OUTPUT_DIR
 
 @dataclass
 class ExtractedClip:
-    """Information about an extracted video clip."""
-    path: Path
-    start_time: float
-    end_time: float
-    event_time: float
-    event_type: str
+    """Metadata for an extracted forensic video clip."""
+    path: Path           # Output file location
+    start_time: float    # Clip start (with buffer)
+    end_time: float      # Clip end (with buffer)
+    event_time: float    # Actual event timestamp
+    event_type: str      # What triggered extraction
 
 
 class ClipExtractor:
-    """Extracts short video clips around detected events."""
+    """
+    Extracts evidence clips centered on suspicious events.
+
+    Each clip includes context buffer (default 3s before/after)
+    to give reviewers full situational awareness.
+    """
 
     def __init__(
         self,

@@ -1,27 +1,21 @@
 """
 Digital Witness - Unified Entry Point
 
-Usage:
-    python run.py                    # Run demo mode (CLI)
-    python run.py --ui               # Launch web interface (Streamlit)
-    python run.py --train            # Train model on video dataset
-    python run.py path/to/video.mp4  # Analyze a specific video (CLI)
-
-Place videos in: data/videos/
-Training videos in: data/training/normal/ and data/training/shoplifting/
+Application router that delegates to the appropriate module based on CLI arguments.
+Supports three execution modes: UI (Streamlit), training, and analysis (CLI).
 """
 import sys
 import subprocess
 from pathlib import Path
 
-# Add src to path
+# Ensure src package is importable from project root
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import BEHAVIOR_MODEL_PATH, DEFAULT_VIDEO_PATH, DATA_DIR
 
 
 def print_banner():
-    """Print application banner."""
+    """Display ASCII banner for CLI output."""
     print()
     print("=" * 60)
     print("  DIGITAL WITNESS")
@@ -31,7 +25,7 @@ def print_banner():
 
 
 def print_help():
-    """Print usage information."""
+    """Display CLI usage instructions."""
     print_banner()
     print("Usage:")
     print("  python run.py              Run CLI demo mode")
@@ -39,118 +33,98 @@ def print_help():
     print("  python run.py --train      Train model on video dataset")
     print("  python run.py <video.mp4>  Analyze specific video (CLI)")
     print()
-    print("Examples:")
-    print("  python run.py --ui")
-    print("  python run.py --train")
-    print("  python run.py data/videos/sample.mp4")
-    print()
 
 
 def launch_ui():
-    """Launch Streamlit web interface."""
+    """
+    Launch Streamlit web interface.
+
+    Resolves the streamlit executable path based on OS (Windows vs Unix),
+    then spawns the Streamlit server process with disabled telemetry.
+    """
     print_banner()
-    print("[MODE] Web Interface")
-    print()
+    print("[MODE] Web Interface\n")
 
-    # Check if model exists
     if not BEHAVIOR_MODEL_PATH.exists():
-        print("[WARNING] Model not found!")
-        print("The UI will show empty Model Performance tab.")
-        print("To train the model, run: python run.py --train")
-        print()
+        print("[WARNING] Model not found. Run: python run.py --train\n")
 
-    print("Starting Streamlit server...")
-    print("Opening http://localhost:8501 in your browser...")
-    print()
-    print("Press Ctrl+C to stop the server.")
-    print("-" * 60)
-    print()
+    print("Starting Streamlit at http://localhost:8501")
+    print("Press Ctrl+C to stop.\n" + "-" * 60 + "\n")
 
-    # Find streamlit executable
-    if sys.platform == "win32":
-        streamlit_path = Path(".venv/Scripts/streamlit.exe")
-    else:
-        streamlit_path = Path(".venv/bin/streamlit")
-
+    # Resolve streamlit path: prefer venv, fallback to system PATH
+    streamlit_path = (
+        Path(".venv/Scripts/streamlit.exe") if sys.platform == "win32"
+        else Path(".venv/bin/streamlit")
+    )
     if not streamlit_path.exists():
-        streamlit_path = "streamlit"  # Fallback to system streamlit
+        streamlit_path = "streamlit"
 
-    # Launch Streamlit
     try:
         subprocess.run([
-            str(streamlit_path),
-            "run",
-            "app.py",
+            str(streamlit_path), "run", "app.py",
             "--server.headless=true",
             "--browser.gatherUsageStats=false",
             "--server.port=8501"
         ])
     except KeyboardInterrupt:
-        print("\n\n[INFO] Server stopped.")
+        print("\n[INFO] Server stopped.")
     except FileNotFoundError:
-        print("[ERROR] Streamlit not found!")
-        print("Install dependencies: pip install -r requirements.txt")
+        print("[ERROR] Streamlit not found. Run: pip install -r requirements.txt")
         sys.exit(1)
 
 
 def run_training():
-    """Run model training."""
-    print_banner()
-    print("[MODE] Video-Based Model Training")
-    print()
+    """
+    Execute the model training pipeline.
 
+    Delegates to train_video_classifier module which processes videos
+    from data/training/ and saves the trained model to models/.
+    """
+    print_banner()
+    print("[MODE] Video-Based Model Training\n")
+
+    # Lazy import to avoid loading ML dependencies until needed
     from src.pose.train_video_classifier import main as train_main
     result = train_main()
 
     if result.get('success'):
         print("\n" + "=" * 60)
-        print("  SUCCESS! Model is ready for use.")
+        print("  Training complete. Model saved.")
         print("=" * 60)
-        print("\nNext steps:")
-        print("  python run.py --ui         Launch web interface")
-        print("  python run.py <video.mp4>  Analyze a video")
     else:
-        print("\n" + "=" * 60)
-        print("  TRAINING FAILED")
-        print("=" * 60)
-        print(f"\nError: {result.get('error', 'Unknown error')}")
+        print(f"\n[ERROR] Training failed: {result.get('error', 'Unknown')}")
         sys.exit(1)
 
 
 def run_analysis(video_path=None):
-    """Run video analysis (CLI mode)."""
-    print_banner()
-    print("[MODE] Video Analysis (CLI)")
-    print()
+    """
+    Run video analysis pipeline (CLI mode).
 
-    # Check if model exists, train if not
+    If no model exists, falls back to synthetic training for demo purposes.
+    Auto-discovers video files from data/videos/ if no path is provided.
+    """
+    print_banner()
+    print("[MODE] Video Analysis (CLI)\n")
+
+    # Model bootstrap: train synthetic model if none exists
     if not BEHAVIOR_MODEL_PATH.exists():
-        print("[SETUP] No trained model found!")
-        print()
-        print("Options:")
-        print("  1. Train with real videos: python run.py --train")
-        print("  2. Continue with synthetic model (demo only)")
-        print()
-        print("Falling back to demo mode with synthetic data...")
-        print()
+        print("[SETUP] No model found. Training synthetic model for demo...\n")
         from src.pose.train_classifier import main as train_synthetic
         train_synthetic()
         print()
 
-    # Find video if not specified
+    # Auto-discover video file if not specified
     if video_path is None:
         videos_dir = DATA_DIR / "videos"
         video_files = list(videos_dir.glob("*.mp4")) + list(videos_dir.glob("*.avi"))
 
         if video_files:
             video_path = video_files[0]
-            print(f"[INFO] Found video: {video_path.name}")
+            print(f"[INFO] Using video: {video_path.name}")
         else:
-            print("[INFO] No video found in data/videos/")
-            print("[INFO] Running in DEMO MODE with simulated data")
-            print()
+            print("[INFO] No video found. Running demo mode.\n")
 
-    # Run analysis
+    # Delegate to main pipeline
     from src.main import run_pipeline, run_demo_mode
 
     if video_path:
@@ -160,12 +134,19 @@ def run_analysis(video_path=None):
 
 
 def main():
-    """Main entry point."""
-    # Parse arguments
+    """
+    CLI argument router.
+
+    Routes execution based on first argument:
+      --ui    -> Streamlit web interface
+      --train -> Model training pipeline
+      <path>  -> Video analysis on specified file
+      (none)  -> Demo mode with auto-discovered video
+    """
     if len(sys.argv) > 1:
         arg = sys.argv[1]
 
-        if arg in ["--help", "-h"]:
+        if arg in ("--help", "-h"):
             print_help()
             return
 
@@ -177,17 +158,15 @@ def main():
             run_training()
             return
 
-        # Assume it's a video path
+        # Treat argument as video file path
         video_path = Path(arg)
         if not video_path.exists():
-            print(f"[ERROR] File not found: {video_path}")
-            print()
+            print(f"[ERROR] File not found: {video_path}\n")
             print_help()
             sys.exit(1)
 
         run_analysis(video_path)
     else:
-        # No arguments - run CLI demo
         run_analysis()
 
 
