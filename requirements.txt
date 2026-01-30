@@ -1,3 +1,4 @@
+# Core dependencies
 opencv-python-headless
 mediapipe
 numpy
@@ -8,3 +9,14 @@ streamlit
 plotly
 joblib
 Pillow
+
+# Deep Learning (YOLO + CNN + LSTM)
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+
+# Report Generation
+reportlab>=4.0.0
+
+# Optional: SHAP for explainability (commented out - heavy dependency)
+# shap>=0.42.0

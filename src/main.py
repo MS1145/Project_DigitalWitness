@@ -1,32 +1,31 @@
 """
 Digital Witness - Main Pipeline Orchestrator
 
-Core analysis pipeline that coordinates the 10-step processing flow:
-video → pose estimation → feature extraction → classification →
-POS cross-check → intent scoring → alert generation → case file output.
+Deep learning analysis pipeline: YOLO → CNN → LSTM
+Detects potential shoplifting by correlating behavioral video analysis
+with POS transaction data.
 
-This module is the primary interface for running end-to-end analysis.
+Pipeline flow:
+1. YOLO object detection & tracking (persons, products, interactions)
+2. CNN spatial feature extraction (ResNet18)
+3. LSTM temporal behavior classification
+4. Bias-aware intent scoring
+5. Quality & edge case analysis
+6. Forensic report generation
 """
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable
 
 from .config import (
     DEFAULT_VIDEO_PATH,
-    DEFAULT_POS_PATH,
-    BEHAVIOR_MODEL_PATH,
-    OUTPUTS_DIR
+    DEFAULT_POS_PATH
 )
 from .video.loader import VideoLoader
-from .video.clip_extractor import ClipExtractor
-from .pose.estimator import PoseEstimator
-from .pose.feature_extractor import FeatureExtractor
-from .pose.behavior_classifier import BehaviorClassifier
 from .pos.data_loader import POSDataLoader
 from .pos.mock_generator import MockPOSGenerator
 from .analysis.cross_checker import CrossChecker, ProductInteraction
-from .analysis.intent_scorer import IntentScorer
 from .analysis.alert_generator import AlertGenerator
 from .output.case_builder import CaseBuilder
 
@@ -34,110 +33,129 @@ from .output.case_builder import CaseBuilder
 def run_pipeline(
     video_path: Optional[Path] = None,
     pos_path: Optional[Path] = None,
-    product_mapping: Optional[Dict[float, str]] = None
+    progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> dict:
     """
-    Execute the complete 10-step analysis pipeline.
+    Execute the deep learning analysis pipeline: YOLO → CNN → LSTM.
 
     Pipeline stages:
-        1-4: Video processing (load, pose, features, classify)
-        5-6: POS correlation (load transactions, cross-check)
-        7-8: Risk assessment (intent score, alert generation)
-        9-10: Evidence packaging (clips, case file)
+        1-2: Object detection & tracking (YOLO)
+        3-4: Feature extraction & classification (CNN + LSTM)
+        5-6: Quality & bias analysis
+        7-8: POS correlation & intent scoring
+        9-10: Alert generation & forensic packaging
 
     Args:
         video_path: Source video file path
         pos_path: POS transaction JSON file path
-        product_mapping: Timestamp-to-SKU mapping for cross-checking
+        progress_callback: Optional callback(progress, message) for UI updates
 
     Returns:
-        Dict containing all intermediate and final results
+        Dict containing all analysis results
     """
+    from .models.deep_pipeline import DeepPipeline
+    from .analysis.quality_analyzer import QualityAnalyzer
+    from .analysis.bias_aware_scorer import BiasAwareScorer
+    from .analysis.edge_case_handler import EdgeCaseHandler
+    from .output.evidence_compiler import EvidenceCompiler
+    from .pose.estimator import PoseEstimator
+
     video_path = video_path or DEFAULT_VIDEO_PATH
     pos_path = pos_path or DEFAULT_POS_PATH
 
     print("=" * 60)
-    print("  DIGITAL WITNESS - Retail Security Analysis")
-    print("  MVP Prototype")
+    print("  DIGITAL WITNESS")
+    print("  Deep Learning Retail Security Analysis")
+    print("  YOLO → CNN → LSTM Pipeline")
     print("=" * 60)
     print()
 
     results = {}
 
-    # Step 1: Load video
-    print("[1/10] Loading video...")
+    def update_progress(progress: float, message: str):
+        if progress_callback:
+            progress_callback(progress, message)
+        print(f"  [{progress:.0%}] {message}")
+
+    # Step 1: Initialize deep pipeline
+    update_progress(0.0, "Initializing deep learning models...")
     try:
-        video_loader = VideoLoader(video_path)
-        metadata = video_loader.metadata
-        print(f"  - File: {metadata.path.name}")
-        print(f"  - Duration: {metadata.duration:.1f}s")
-        print(f"  - Resolution: {metadata.width}x{metadata.height}")
-        print(f"  - FPS: {metadata.fps}")
-        results["video_metadata"] = metadata
-    except FileNotFoundError:
-        print(f"  ! Video file not found: {video_path}")
-        print("  ! Running in demo mode with simulated data...")
+        pipeline = DeepPipeline(device="auto")
+        pipeline.initialize()
+        print("  - YOLO detector: Ready")
+        print("  - CNN feature extractor: Ready")
+        print("  - LSTM classifier: Ready")
+    except Exception as e:
+        print(f"  ! Failed to initialize deep pipeline: {e}")
+        print("  ! Running in demo mode...")
         return run_demo_mode(pos_path)
 
-    # Step 2: Run pose estimation using MediaPipe
-    # Process every 2nd frame (step=2) to balance accuracy vs performance
-    print("\n[2/10] Running pose estimation...")
+    # Step 2: Check video file exists
+    video_path = Path(video_path)
+    if not video_path.exists():
+        print(f"  ! Video file not found: {video_path}")
+        print("  ! Running in demo mode...")
+        pipeline.close()
+        return run_demo_mode(pos_path)
+
+    # Step 3: Process video through deep pipeline
+    update_progress(0.05, "Processing video with deep learning...")
+    try:
+        deep_result = pipeline.process_video(
+            str(video_path),
+            frame_step=2,  # Process every 2nd frame for speed
+            progress_callback=lambda p, m: update_progress(0.05 + p * 0.55, m),
+            store_frame_analyses=False
+        )
+
+        print(f"\n  Deep Analysis Results:")
+        print(f"  - Frames processed: {deep_result.processed_frames}")
+        print(f"  - Persons tracked: {deep_result.persons_tracked}")
+        print(f"  - Products tracked: {deep_result.products_tracked}")
+        print(f"  - Interactions detected: {deep_result.total_interactions}")
+        print(f"  - Overall intent: {deep_result.overall_intent}")
+        print(f"  - Confidence: {deep_result.overall_confidence:.2%}")
+
+        results["deep_result"] = deep_result
+
+    except Exception as e:
+        print(f"  ! Error in deep pipeline: {e}")
+        pipeline.close()
+        return run_demo_mode(pos_path)
+
+    # Step 4: Load video metadata
+    update_progress(0.60, "Loading video metadata...")
+    video_loader = VideoLoader(video_path)
+    metadata = video_loader.metadata
+    results["video_metadata"] = metadata
+
+    # Step 5: Run pose estimation for quality analysis
+    update_progress(0.62, "Running quality analysis...")
     pose_results = []
     with video_loader:
         with PoseEstimator() as estimator:
-            frame_count = 0
-            for frame_num, frame in video_loader.frames(step=2):
+            for frame_num, frame in video_loader.frames(step=4):  # Sparse sampling
                 result = estimator.process_frame(frame, frame_num, metadata.fps)
                 pose_results.append(result)
-                frame_count += 1
-
-                if frame_count % 50 == 0:
-                    print(f"  - Processed {frame_count} frames...")
-
-    poses_detected = sum(1 for p in pose_results if p.landmarks is not None)
-    print(f"  - Total frames processed: {frame_count}")
-    print(f"  - Poses detected: {poses_detected}")
     results["pose_results"] = pose_results
 
-    # Step 3: Extract features
-    print("\n[3/10] Extracting features from pose sequences...")
-    feature_extractor = FeatureExtractor()
-    pose_features = feature_extractor.extract_from_sequence(pose_results)
-    print(f"  - Feature windows extracted: {len(pose_features)}")
-    results["pose_features"] = pose_features
+    # Step 6: Quality analysis
+    update_progress(0.68, "Assessing video quality...")
+    quality_analyzer = QualityAnalyzer()
+    quality_report = quality_analyzer.analyze_sequence(pose_results, metadata.fps)
+    print(f"\n  Quality Analysis:")
+    print(f"  - Detection rate: {quality_report.pose_detection_rate:.1%}")
+    print(f"  - Quality score: {quality_report.overall_quality_score:.2f}")
+    print(f"  - Usable: {'Yes' if quality_report.usable_for_analysis else 'No'}")
+    results["quality_report"] = quality_report
 
-    # Step 4: Classify behaviors
-    print("\n[4/10] Classifying behaviors...")
-    try:
-        classifier = BehaviorClassifier()
-        behavior_events = classifier.classify_sequence(pose_features)
-        behavior_events = classifier.merge_consecutive_events(behavior_events)
-        print(f"  - Behavior events detected: {len(behavior_events)}")
-
-        # Count by type
-        for btype in ["normal", "pickup", "concealment", "bypass"]:
-            count = sum(1 for e in behavior_events if e.behavior_type == btype)
-            if count > 0:
-                print(f"    - {btype}: {count}")
-
-    except (FileNotFoundError, RuntimeError) as e:
-        print(f"  ! Model not trained: {e}")
-        print("  ! Run 'python -m src.pose.train_classifier' first")
-        behavior_events = []
-
-    results["behavior_events"] = behavior_events
-
-    # Step 5: Load POS data
-    print("\n[5/10] Loading POS transaction data...")
+    # Step 7: Load POS data
+    update_progress(0.72, "Loading POS transaction data...")
     try:
         pos_loader = POSDataLoader(pos_path)
         transactions = pos_loader.load()
-        print(f"  - Transactions loaded: {len(transactions)}")
-        total_items = sum(len(t.items) for t in transactions)
-        print(f"  - Total items billed: {total_items}")
     except FileNotFoundError:
-        print(f"  ! POS file not found: {pos_path}")
-        print("  ! Generating mock POS data...")
+        print(f"  ! POS file not found, generating mock data...")
         generator = MockPOSGenerator()
         mock_data = generator.generate_scenario(
             scenario_type="partial",
@@ -146,106 +164,116 @@ def run_pipeline(
             detected_items=["ITEM001", "ITEM002", "ITEM003"]
         )
         generator.save_to_file(mock_data)
-        pos_loader = POSDataLoader()
-        transactions = pos_loader.load()
+        transactions = POSDataLoader().load()
 
+    print(f"  - Transactions loaded: {len(transactions)}")
     results["transactions"] = transactions
 
-    # Step 6: Cross-check video-detected pickups vs POS billing
-    # This is the core fraud detection logic: items picked up but not paid
-    print("\n[6/10] Cross-checking detected interactions with billing...")
+    # Step 8: Cross-check using interaction timeline
+    update_progress(0.75, "Cross-checking interactions with billing...")
     cross_checker = CrossChecker()
 
-    # Map pickup events to product SKUs
-    # MVP limitation: relies on product_mapping or demo SKUs
+    # Convert deep interactions to product interactions
     detected_interactions = []
-    if product_mapping:
-        for event in behavior_events:
-            if event.behavior_type == "pickup" and event.start_time in product_mapping:
-                interaction = ProductInteraction(
-                    sku=product_mapping[event.start_time],
-                    timestamp=event.start_time,
-                    interaction_type="pickup",
-                    confidence=event.confidence
-                )
-                detected_interactions.append(interaction)
-    else:
-        # Demo: simulate some detected products
-        demo_skus = ["ITEM001", "ITEM002", "ITEM003"]
-        for i, event in enumerate(behavior_events):
-            if event.behavior_type == "pickup" and i < len(demo_skus):
-                interaction = ProductInteraction(
-                    sku=demo_skus[i],
-                    timestamp=event.start_time,
-                    interaction_type="pickup",
-                    confidence=event.confidence
-                )
-                detected_interactions.append(interaction)
+    for i, interaction in enumerate(deep_result.interaction_timeline[:10]):
+        if interaction.interaction_type in ["pickup", "hold"]:
+            detected_interactions.append(ProductInteraction(
+                sku=f"ITEM{(i % 3) + 1:03d}",  # Demo SKU mapping
+                timestamp=interaction.timestamp,
+                interaction_type=interaction.interaction_type,
+                confidence=interaction.confidence
+            ))
 
     discrepancy_report = cross_checker.check_discrepancies(
         detected_interactions,
         transactions
     )
-    print(f"  - Items detected: {discrepancy_report.total_detected}")
-    print(f"  - Items billed: {discrepancy_report.total_billed}")
     print(f"  - Discrepancies: {discrepancy_report.discrepancy_count}")
-    print(f"  - Match rate: {discrepancy_report.match_rate:.1%}")
     results["discrepancy_report"] = discrepancy_report
 
-    # Step 7: Calculate intent score
-    print("\n[7/10] Calculating intent score...")
-    intent_scorer = IntentScorer()
-    intent_score = intent_scorer.calculate_score(
+    # Step 9: Convert deep predictions to behavior events
+    update_progress(0.78, "Processing behavior predictions...")
+    from .pose.behavior_classifier import BehaviorEvent
+
+    behavior_events = []
+    for pred in deep_result.intent_predictions:
+        event = BehaviorEvent(
+            behavior_type=pred.intent_class,
+            start_time=pred.start_time or 0.0,
+            end_time=pred.end_time or 0.0,
+            start_frame=int((pred.start_time or 0) * metadata.fps),
+            end_frame=int((pred.end_time or 0) * metadata.fps),
+            confidence=pred.confidence,
+            probabilities=pred.class_probabilities
+        )
+        behavior_events.append(event)
+    results["behavior_events"] = behavior_events
+
+    # Step 10: Bias-aware intent scoring
+    update_progress(0.82, "Calculating bias-aware intent score...")
+    bias_scorer = BiasAwareScorer()
+    bias_aware_score = bias_scorer.calculate_score(
         discrepancy_report,
         behavior_events,
-        metadata.duration
+        metadata.duration,
+        quality_report
     )
-    print(f"  - Intent score: {intent_score.score:.2f}")
-    print(f"  - Severity: {intent_score.severity.value}")
-    results["intent_score"] = intent_score
 
-    # Step 8: Generate alert if needed
-    print("\n[8/10] Checking alert conditions...")
+    print(f"\n  Bias-Aware Intent Assessment:")
+    print(f"  - Raw score: {bias_aware_score.raw_score:.2f}")
+    print(f"  - Adjusted score: {bias_aware_score.adjusted_score:.2f}")
+    print(f"  - Bias adjustment: {bias_aware_score.bias_adjustment_factor:.2f}")
+    print(f"  - Confidence: {bias_aware_score.confidence_level}")
+    print(f"  - Fairness score: {bias_aware_score.fairness_report.overall_fairness_score:.1%}")
+
+    results["bias_aware_score"] = bias_aware_score
+    results["fairness_report"] = bias_aware_score.fairness_report
+
+    # Step 11: Edge case handling
+    update_progress(0.85, "Checking for edge cases...")
+    edge_handler = EdgeCaseHandler()
+    edge_report = edge_handler.analyze(behavior_events, quality_report)
+
+    if edge_report.requires_manual_review:
+        print(f"  - Edge cases detected: {edge_report.total_flags}")
+        print(f"  - Manual review: REQUIRED")
+    results["edge_report"] = edge_report
+
+    # Step 12: Generate alert
+    update_progress(0.88, "Generating alert...")
     alert_generator = AlertGenerator()
 
-    # Get suspicious events for clip extraction
-    suspicious_events = [
-        {"timestamp": e.start_time, "type": e.behavior_type}
-        for e in behavior_events
-        if e.behavior_type in ["concealment", "bypass", "pickup"]
-    ]
+    # Convert bias-aware score to standard intent score for alert
+    from .analysis.intent_scorer import IntentScore
+    intent_score = IntentScore(
+        score=bias_aware_score.final_score,
+        severity=bias_aware_score.severity,
+        components=bias_aware_score.components,
+        explanation=bias_aware_score.explanation
+    )
 
-    # Step 9: Extract forensic clips
-    print("\n[9/10] Extracting forensic video clips...")
-    forensic_clips = []
-    if suspicious_events:
-        with video_loader:
-            clip_extractor = ClipExtractor(video_loader)
-            forensic_clips = clip_extractor.extract_clips_for_events(
-                suspicious_events[:5]  # Limit to 5 clips
-            )
-        print(f"  - Clips extracted: {len(forensic_clips)}")
-    else:
-        print("  - No suspicious events to clip")
-    results["forensic_clips"] = forensic_clips
-
-    # Generate alert
     alert = alert_generator.generate_alert(
         intent_score,
         discrepancy_report,
         behavior_events,
-        forensic_clips
+        []  # Clips generated in forensic package
     )
+
     if alert:
+        # Add fairness info to alert
+        alert.notes = (alert.notes or "") + f"\nFairness Score: {bias_aware_score.fairness_report.overall_fairness_score:.1%}"
+        if bias_aware_score.fairness_report.requires_manual_review:
+            alert.notes += "\n[BIAS INDICATORS DETECTED - MANUAL REVIEW REQUIRED]"
         print(f"\n  *** ALERT GENERATED ***")
-        print(f"  - Alert ID: {alert.alert_id}")
         print(f"  - Severity: {alert.severity.value}")
     else:
         print("  - No alert generated (below threshold)")
-    results["alert"] = alert
 
-    # Step 10: Build case file
-    print("\n[10/10] Building case file...")
+    results["alert"] = alert
+    results["intent_score"] = intent_score
+
+    # Step 13: Build case file
+    update_progress(0.91, "Building case file...")
     case_builder = CaseBuilder()
     case = case_builder.build_case(
         video_metadata=metadata,
@@ -253,24 +281,129 @@ def run_pipeline(
         discrepancy_report=discrepancy_report,
         intent_score=intent_score,
         alert=alert,
-        forensic_clips=forensic_clips
+        forensic_clips=[]
     )
+
+    # Add deep learning specific info to case
+    case.notes = f"""
+Deep Learning Analysis Results:
+- Pipeline: YOLO → CNN → LSTM
+- Persons tracked: {deep_result.persons_tracked}
+- Products tracked: {deep_result.products_tracked}
+- Interactions: {deep_result.total_interactions}
+- Suspicious segments: {len(deep_result.suspicious_segments)}
+
+Quality Analysis:
+- Detection rate: {quality_report.pose_detection_rate:.1%}
+- Quality score: {quality_report.overall_quality_score:.2f}
+
+Fairness Assessment:
+- Fairness score: {bias_aware_score.fairness_report.overall_fairness_score:.1%}
+- Bias risk: {bias_aware_score.fairness_report.bias_metrics.overall_bias_risk.value}
+- Analysis reliable: {bias_aware_score.fairness_report.analysis_reliable}
+"""
+
     case_path = case_builder.save_case(case)
-    print(f"  - Case ID: {case.case_id}")
-    print(f"  - Saved to: {case_path}")
     results["case"] = case
     results["case_path"] = case_path
+
+    # Step 14: Generate forensic package
+    update_progress(0.94, "Generating forensic package...")
+    try:
+        evidence_compiler = EvidenceCompiler()
+        forensic_package = evidence_compiler.compile_package(
+            case_data=case.to_dict(),
+            video_path=video_path,
+            pose_results=pose_results,
+            behavior_events=behavior_events,
+            quality_report=quality_report,
+            fairness_report=bias_aware_score.fairness_report,
+            generate_clips=True,
+            max_clips=3
+        )
+        print(f"  - Forensic package: {forensic_package.package_dir}")
+        results["forensic_package"] = forensic_package
+    except Exception as e:
+        print(f"  - Forensic package generation skipped: {e}")
+
+    # Cleanup
+    pipeline.close()
+
+    update_progress(1.0, "Analysis complete!")
 
     # Final summary
     print("\n" + "=" * 60)
     print("  ANALYSIS COMPLETE")
     print("=" * 60)
-    print(case.summary)
+    print(f"\n  Case ID: {case.case_id}")
+    print(f"  Saved to: {case_path}")
+    print(f"\n{bias_aware_score.explanation}")
 
     if alert:
         print("\n" + alert_generator.format_for_display(alert))
 
-    return results
+    # Return results in format expected by Streamlit app
+    return {
+        "success": True,
+        "video_metadata": {
+            "filename": metadata.path.name,
+            "duration": metadata.duration,
+            "fps": metadata.fps,
+            "width": metadata.width,
+            "height": metadata.height,
+            "frame_count": metadata.frame_count
+        },
+        "detections": {
+            "persons_tracked": deep_result.persons_tracked,
+            "products_detected": deep_result.products_tracked,
+            "interactions": deep_result.total_interactions,
+            "frames_processed": deep_result.processed_frames
+        },
+        "behavior_events": [
+            {
+                "behavior_type": e.behavior_type,
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "confidence": e.confidence,
+                "probabilities": e.probabilities
+            }
+            for e in behavior_events
+        ],
+        "intent_score": {
+            "score": intent_score.score,
+            "severity": intent_score.severity.value,
+            "components": intent_score.components,
+            "explanation": intent_score.explanation
+        },
+        "discrepancy_report": {
+            "total_detected": discrepancy_report.total_detected,
+            "total_billed": discrepancy_report.total_billed,
+            "discrepancy_count": discrepancy_report.discrepancy_count,
+            "match_rate": discrepancy_report.match_rate,
+            "missing_from_billing": discrepancy_report.missing_from_billing
+        },
+        "quality_analysis": {
+            "reliability_score": quality_report.overall_quality_score,
+            "detection_rate": quality_report.pose_detection_rate,
+            "usable": quality_report.usable_for_analysis,
+            "issues": quality_report.quality_issues if hasattr(quality_report, 'quality_issues') else []
+        },
+        "bias_report": {
+            "overall_fairness_score": bias_aware_score.fairness_report.overall_fairness_score,
+            "analysis_reliable": bias_aware_score.fairness_report.analysis_reliable,
+            "requires_review": bias_aware_score.fairness_report.requires_manual_review,
+            "flags": [str(f) for f in bias_aware_score.fairness_report.bias_metrics.flags] if hasattr(bias_aware_score.fairness_report.bias_metrics, 'flags') else []
+        },
+        "alert": {
+            "alert_id": alert.alert_id,
+            "level": alert.severity.value,
+            "message": alert.explanation
+        } if alert else None,
+        "case_id": case.case_id,
+        "case_path": str(case_path),
+        # Keep raw results for advanced use
+        "_raw": results
+    }
 
 
 def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
@@ -284,6 +417,7 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
 
     from .pose.behavior_classifier import BehaviorEvent
     from .video.loader import VideoMetadata
+    from .analysis.intent_scorer import IntentScorer
 
     # Simulate video metadata
     metadata = VideoMetadata(
@@ -296,7 +430,7 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
         codec="H264"
     )
 
-    # Simulate behavior events
+    # Simulate behavior events (as if from LSTM)
     behavior_events = [
         BehaviorEvent("normal", 0.0, 10.0, 0, 300, 0.9, {"normal": 0.9, "pickup": 0.05, "concealment": 0.03, "bypass": 0.02}),
         BehaviorEvent("pickup", 10.0, 12.0, 300, 360, 0.85, {"normal": 0.1, "pickup": 0.85, "concealment": 0.03, "bypass": 0.02}),
@@ -357,7 +491,7 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
         intent_score,
         discrepancy_report,
         behavior_events,
-        []  # No clips in demo mode
+        []
     )
 
     # Case file
@@ -371,6 +505,7 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
         alert=alert,
         forensic_clips=[]
     )
+    case.notes = "DEMO MODE - Simulated data for demonstration purposes"
     case_path = case_builder.save_case(case)
     print(f"  - Case saved: {case_path}")
 
@@ -383,21 +518,71 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
     if alert:
         print("\n" + alert_generator.format_for_display(alert))
 
+    # Return results in format expected by Streamlit app
     return {
-        "video_metadata": metadata,
-        "behavior_events": behavior_events,
-        "transactions": transactions,
-        "discrepancy_report": discrepancy_report,
-        "intent_score": intent_score,
-        "alert": alert,
-        "case": case,
-        "case_path": case_path
+        "success": True,
+        "demo_mode": True,
+        "video_metadata": {
+            "filename": metadata.path.name,
+            "duration": metadata.duration,
+            "fps": metadata.fps,
+            "width": metadata.width,
+            "height": metadata.height,
+            "frame_count": metadata.frame_count
+        },
+        "detections": {
+            "persons_tracked": 1,
+            "products_detected": 3,
+            "interactions": len(detected_interactions),
+            "frames_processed": metadata.frame_count
+        },
+        "behavior_events": [
+            {
+                "behavior_type": e.behavior_type,
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "confidence": e.confidence,
+                "probabilities": e.probabilities
+            }
+            for e in behavior_events
+        ],
+        "intent_score": {
+            "score": intent_score.score,
+            "severity": intent_score.severity.value,
+            "components": intent_score.components,
+            "explanation": intent_score.explanation
+        },
+        "discrepancy_report": {
+            "total_detected": discrepancy_report.total_detected,
+            "total_billed": discrepancy_report.total_billed,
+            "discrepancy_count": discrepancy_report.discrepancy_count,
+            "match_rate": discrepancy_report.match_rate,
+            "missing_from_billing": discrepancy_report.missing_from_billing
+        },
+        "quality_analysis": {
+            "reliability_score": 0.85,
+            "detection_rate": 0.90,
+            "usable": True,
+            "issues": []
+        },
+        "bias_report": {
+            "overall_fairness_score": 0.90,
+            "analysis_reliable": True,
+            "requires_review": False,
+            "flags": []
+        },
+        "alert": {
+            "alert_id": alert.alert_id,
+            "level": alert.severity.value,
+            "message": alert.explanation
+        } if alert else None,
+        "case_id": case.case_id,
+        "case_path": str(case_path)
     }
 
 
 def main():
     """Main entry point."""
-    # Check for command line arguments
     video_path = None
     pos_path = None
 

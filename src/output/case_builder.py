@@ -38,6 +38,22 @@ class CaseFile:
     alert: Optional[Dict[str, Any]]          # None if no alert triggered
     forensic_clips: List[Dict[str, Any]]
     summary: str                             # Human-readable summary
+    notes: str = ""                          # Additional notes (e.g., deep learning info)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "case_id": self.case_id,
+            "created_at": self.created_at,
+            "video_metadata": self.video_metadata,
+            "behavior_timeline": self.behavior_timeline,
+            "discrepancy_report": self.discrepancy_report,
+            "intent_score": self.intent_score,
+            "alert": self.alert,
+            "forensic_clips": self.forensic_clips,
+            "summary": self.summary,
+            "notes": self.notes
+        }
 
 
 class CaseBuilder:
@@ -174,17 +190,7 @@ class CaseBuilder:
         output_path = self.output_dir / filename
 
         # Convert to dict
-        case_dict = {
-            "case_id": case.case_id,
-            "created_at": case.created_at,
-            "video_metadata": case.video_metadata,
-            "behavior_timeline": case.behavior_timeline,
-            "discrepancy_report": case.discrepancy_report,
-            "intent_score": case.intent_score,
-            "alert": case.alert,
-            "forensic_clips": case.forensic_clips,
-            "summary": case.summary
-        }
+        case_dict = case.to_dict()
 
         with open(output_path, 'w') as f:
             json.dump(case_dict, f, indent=2)
