@@ -59,9 +59,11 @@ def run_pipeline(
     from .analysis.edge_case_handler import EdgeCaseHandler
     from .output.evidence_compiler import EvidenceCompiler
 
+    # Use default paths if not provided
     video_path = video_path or DEFAULT_VIDEO_PATH
     pos_path = pos_path or DEFAULT_POS_PATH
 
+    # Display system banner
     print("=" * 60)
     print("  DIGITAL WITNESS")
     print("  Deep Learning Retail Security Analysis")
@@ -76,7 +78,10 @@ def run_pipeline(
             progress_callback(progress, message)
         print(f"  [{progress:.0%}] {message}")
 
-    # Step 1: Initialize deep pipeline
+    # ==========================================================================
+    # PIPELINE STAGE 1: Model Initialization
+    # Load YOLO (detection), CNN (features), and LSTM (classification) models
+    # ==========================================================================
     update_progress(0.0, "Initializing deep learning models...")
     try:
         pipeline = DeepPipeline(device="auto")
@@ -89,7 +94,10 @@ def run_pipeline(
         print("  ! Running in demo mode...")
         return run_demo_mode(pos_path)
 
-    # Step 2: Check video file exists
+    # ==========================================================================
+    # PIPELINE STAGE 2: Video Validation
+    # Verify input video exists before processing
+    # ==========================================================================
     video_path = Path(video_path)
     if not video_path.exists():
         print(f"  ! Video file not found: {video_path}")
@@ -97,7 +105,13 @@ def run_pipeline(
         pipeline.close()
         return run_demo_mode(pos_path)
 
-    # Step 3: Process video through deep pipeline
+    # ==========================================================================
+    # PIPELINE STAGE 3: Deep Learning Analysis (YOLO → CNN → LSTM)
+    # Process video through the full deep learning pipeline:
+    # - YOLO detects persons and products in each frame
+    # - CNN extracts 512-dim spatial features from detections
+    # - LSTM classifies temporal behavior sequences
+    # ==========================================================================
     update_progress(0.05, "Processing video with deep learning...")
     try:
         deep_result = pipeline.process_video(
@@ -122,13 +136,15 @@ def run_pipeline(
         pipeline.close()
         return run_demo_mode(pos_path)
 
-    # Step 4: Load video metadata
+    # ==========================================================================
+    # PIPELINE STAGE 4-5: Metadata & Quality Analysis
+    # Extract video properties and assess quality for reliability scoring
+    # ==========================================================================
     update_progress(0.60, "Loading video metadata...")
     video_loader = VideoLoader(video_path)
     metadata = video_loader.metadata
     results["video_metadata"] = metadata
 
-    # Step 5: Quality analysis based on deep pipeline results
     update_progress(0.65, "Assessing video quality...")
     quality_analyzer = QualityAnalyzer()
     quality_report = quality_analyzer.analyze_from_deep_result(deep_result, metadata.fps)
@@ -138,7 +154,10 @@ def run_pipeline(
     print(f"  - Usable: {'Yes' if quality_report.usable_for_analysis else 'No'}")
     results["quality_report"] = quality_report
 
-    # Step 7: Load POS data
+    # ==========================================================================
+    # PIPELINE STAGE 6-7: POS Data Loading
+    # Load transaction records to compare against video-detected interactions
+    # ==========================================================================
     update_progress(0.72, "Loading POS transaction data...")
     try:
         pos_loader = POSDataLoader(pos_path)
@@ -158,7 +177,11 @@ def run_pipeline(
     print(f"  - Transactions loaded: {len(transactions)}")
     results["transactions"] = transactions
 
-    # Step 8: Cross-check using interaction timeline
+    # ==========================================================================
+    # PIPELINE STAGE 8: Video-to-POS Cross-Check
+    # Compare detected product interactions against billing records
+    # Discrepancies (picked up but not billed) are key shoplifting indicators
+    # ==========================================================================
     update_progress(0.75, "Cross-checking interactions with billing...")
     cross_checker = CrossChecker()
 
@@ -198,7 +221,12 @@ def run_pipeline(
         behavior_events.append(event)
     results["behavior_events"] = behavior_events
 
-    # Step 10: Bias-aware intent scoring
+    # ==========================================================================
+    # PIPELINE STAGE 10: Bias-Aware Intent Scoring
+    # Calculate risk score with fairness adjustments to prevent bias
+    # Score formula: (discrepancy*0.4) + (concealment*0.3) + (bypass*0.2) + (duration*0.1)
+    # Adjustments applied when bias indicators are detected
+    # ==========================================================================
     update_progress(0.82, "Calculating bias-aware intent score...")
     bias_scorer = BiasAwareScorer()
     bias_aware_score = bias_scorer.calculate_score(
@@ -228,7 +256,11 @@ def run_pipeline(
         print(f"  - Manual review: REQUIRED")
     results["edge_report"] = edge_report
 
-    # Step 12: Generate alert
+    # ==========================================================================
+    # PIPELINE STAGE 12: Alert Generation
+    # Generate advisory alert if score exceeds threshold (default: 0.5)
+    # IMPORTANT: All alerts require human review before action
+    # ==========================================================================
     update_progress(0.88, "Generating alert...")
     alert_generator = AlertGenerator()
 
@@ -261,7 +293,10 @@ def run_pipeline(
     results["alert"] = alert
     results["intent_score"] = intent_score
 
-    # Step 13: Build case file
+    # ==========================================================================
+    # PIPELINE STAGE 13: Case File Generation
+    # Create JSON audit trail with all evidence for review and archival
+    # ==========================================================================
     update_progress(0.91, "Building case file...")
     case_builder = CaseBuilder()
     case = case_builder.build_case(
@@ -297,13 +332,14 @@ Fairness Assessment:
     results["case_path"] = case_path
 
     # Step 14: Generate forensic package
+    # Compile all evidence into a self-contained forensic package for case review
     update_progress(0.94, "Generating forensic package...")
     try:
         evidence_compiler = EvidenceCompiler()
         forensic_package = evidence_compiler.compile_package(
             case_data=case.to_dict(),
             video_path=video_path,
-            pose_results=pose_results,
+            pose_results=None,  # Pose results not used in deep learning pipeline
             behavior_events=behavior_events,
             quality_report=quality_report,
             fairness_report=bias_aware_score.fairness_report,

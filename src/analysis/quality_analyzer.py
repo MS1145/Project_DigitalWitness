@@ -18,10 +18,15 @@ import numpy as np
 
 @dataclass
 class FrameQualityMetrics:
-    """Quality metrics for a single frame."""
+    """
+    Quality metrics for a single frame.
+
+    Used by EdgeCaseHandler to assess reliability of behavior detections
+    at specific timestamps in the video.
+    """
     frame_number: int
     timestamp: float
-    person_detected: bool
+    pose_detected: bool  # Whether a person/pose was detected in this frame
     detection_confidence: float
     overall_quality: float
     quality_issues: List[str] = field(default_factory=list)
