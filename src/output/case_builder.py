@@ -12,7 +12,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
 
 from ..video.loader import VideoMetadata
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..analysis.cross_checker import DiscrepancyReport
 from ..analysis.intent_scorer import IntentScore
 from ..analysis.alert_generator import Alert

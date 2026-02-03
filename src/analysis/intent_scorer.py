@@ -6,22 +6,47 @@ POS discrepancies, concealment behaviors, checkout bypass, and duration.
 
 The score is NOT a guilt determination - it's a prioritization metric
 for human review. All weights are configurable in config.py.
+
+Scoring Formula:
+----------------
+Intent Score = (w1 * discrepancy) + (w2 * concealment) + (w3 * bypass) + (w4 * duration)
+
+Where:
+- discrepancy (40%): Items detected but not billed (strongest signal)
+- concealment (30%): Hiding behavior detected by LSTM
+- bypass (20%): Checkout avoidance behavior detected
+- duration (10%): Time spent in suspicious state
+
+Why These Weights?
+------------------
+POS discrepancy is weighted highest because it's the most concrete evidence:
+an item was physically handled but not paid for. Behavioral signals are
+weighted lower because they have higher false positive rates (e.g., someone
+might appear to conceal an item while actually adjusting their jacket).
+
+Severity Thresholds:
+--------------------
+- NONE: score < 0.3 (normal shopping behavior)
+- LOW: 0.3 <= score < 0.5 (minor anomalies)
+- MEDIUM: 0.5 <= score < 0.7 (review recommended)
+- HIGH: 0.7 <= score < 0.85 (immediate review)
+- CRITICAL: score >= 0.85 (potential intervention)
 """
 from dataclasses import dataclass
 from typing import List, Optional
 from enum import Enum
 
 from .cross_checker import DiscrepancyReport
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..config import (
-    WEIGHT_DISCREPANCY,
-    WEIGHT_CONCEALMENT,
-    WEIGHT_BYPASS,
-    WEIGHT_DURATION,
+    WEIGHT_DISCREPANCY,       # 0.4 - POS mismatch weight
+    WEIGHT_CONCEALMENT,       # 0.3 - hiding behavior weight
+    WEIGHT_BYPASS,            # 0.2 - checkout avoidance weight
+    WEIGHT_DURATION,          # 0.1 - time in suspicious state weight
     SEVERITY_LEVELS,
-    INTENT_THRESHOLD_LOW,
-    INTENT_THRESHOLD_MEDIUM,
-    INTENT_THRESHOLD_HIGH
+    INTENT_THRESHOLD_LOW,     # 0.3
+    INTENT_THRESHOLD_MEDIUM,  # 0.5
+    INTENT_THRESHOLD_HIGH     # 0.7
 )
 
 
@@ -163,11 +188,20 @@ class IntentScorer:
         Score from POS mismatches (strongest signal).
 
         Items picked up but not billed are the primary indicator.
-        Scale factor of 1.5 means 67% unbilled items = max score.
+        Scale factor of 1.5 means 67% unbilled items = max score (1.0).
+
+        Examples:
+        - 0 items unbilled → score = 0.0
+        - 1 of 3 items unbilled (33%) → score = 0.5
+        - 2 of 3 items unbilled (67%) → score = 1.0 (capped)
+        - 3 of 3 items unbilled (100%) → score = 1.0 (capped)
         """
         if report.total_detected == 0:
             return 0.0
+
+        # Calculate ratio of missing (unbilled) items
         missing_ratio = report.discrepancy_count / report.total_detected
+        # Scale up and cap at 1.0 (67% unbilled = max score)
         return min(1.0, missing_ratio * 1.5)
 
     def _score_concealment(self, events: List[BehaviorEvent]) -> float:
@@ -176,13 +210,22 @@ class IntentScorer:
 
         Factors in both count and confidence. Maxes out at 3 events
         to avoid over-weighting repeated low-confidence detections.
+
+        Formula: avg_confidence * min(count/3, 1.0)
+
+        This means:
+        - 1 high-confidence concealment (0.9) → 0.9 * 0.33 = 0.30
+        - 3 high-confidence concealments (0.9) → 0.9 * 1.0 = 0.90
+        - 5 low-confidence concealments (0.5) → 0.5 * 1.0 = 0.50 (capped at 3)
         """
         concealment_events = [e for e in events if e.behavior_type == "concealment"]
 
         if not concealment_events:
             return 0.0
 
+        # Average confidence across all concealment events
         avg_confidence = sum(e.confidence for e in concealment_events) / len(concealment_events)
+        # Count factor: saturates at 3 events to prevent gaming via many low-conf detections
         count_factor = min(1.0, len(concealment_events) / 3)
 
         return avg_confidence * count_factor
@@ -193,12 +236,17 @@ class IntentScorer:
 
         Uses max confidence rather than average since a single high-confidence
         bypass is more significant than multiple uncertain ones.
+
+        Rationale: You only need to bypass checkout once to steal items.
+        Multiple bypass detections often indicate the same exit attempt
+        captured across multiple time windows.
         """
         bypass_events = [e for e in events if e.behavior_type == "bypass"]
 
         if not bypass_events:
             return 0.0
 
+        # Return highest confidence bypass detection
         return max(e.confidence for e in bypass_events)
 
     def _score_duration(
@@ -210,7 +258,17 @@ class IntentScorer:
         Score from time spent in suspicious states.
 
         Longer durations of concealment/bypass increase risk score.
-        Scale factor of 3 means ~33% suspicious time = max score.
+        Scale factor of 3 means ~33% suspicious time = max score (1.0).
+
+        Why duration matters:
+        - Brief concealment might be adjusting clothing
+        - Extended concealment more likely intentional
+        - Prolonged bypass (wandering near exit) suggests hesitation/intent
+
+        Examples (in 60-second video):
+        - 5 sec suspicious → 5/60 * 3 = 0.25
+        - 10 sec suspicious → 10/60 * 3 = 0.50
+        - 20 sec suspicious → 20/60 * 3 = 1.00 (capped)
         """
         suspicious_types = {"concealment", "bypass"}
         suspicious_events = [e for e in events if e.behavior_type in suspicious_types]
@@ -218,8 +276,10 @@ class IntentScorer:
         if not suspicious_events or video_duration <= 0:
             return 0.0
 
+        # Sum total time spent in suspicious states
         suspicious_duration = sum(e.end_time - e.start_time for e in suspicious_events)
         ratio = suspicious_duration / video_duration
+        # Scale up and cap (33% suspicious time = max score)
         return min(1.0, ratio * 3)
 
     def _determine_severity(self, score: float) -> Severity:

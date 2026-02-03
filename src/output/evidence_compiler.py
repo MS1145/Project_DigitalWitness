@@ -145,14 +145,13 @@ class EvidenceCompiler:
         annotated_clips = []
         clip_paths = []
 
-        if generate_clips and video_path and behavior_events and pose_results:
+        if generate_clips and video_path and behavior_events:
             # Update clip generator output directory
             self.clip_generator.output_dir = clips_dir
 
             annotated_clips = self.clip_generator.generate_clips_for_events(
                 video_path,
                 behavior_events,
-                pose_results,
                 max_clips=max_clips
             )
             clip_paths = [clip.path for clip in annotated_clips]
@@ -164,7 +163,6 @@ class EvidenceCompiler:
             screenshots = self._generate_screenshots(
                 video_path,
                 behavior_events,
-                pose_results,
                 screenshots_dir
             )
 
@@ -234,7 +232,6 @@ class EvidenceCompiler:
         self,
         video_path: Path,
         behavior_events: List,
-        pose_results: Optional[List],
         output_dir: Path
     ) -> List[Path]:
         """Generate evidence screenshots for key moments."""

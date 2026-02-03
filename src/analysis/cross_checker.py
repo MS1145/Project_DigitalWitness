@@ -8,7 +8,7 @@ these sets is a primary indicator of potential shoplifting.
 from dataclasses import dataclass
 from typing import List, Dict, Set
 
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..pos.data_loader import Transaction
 
 

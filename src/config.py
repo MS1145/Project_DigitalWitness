@@ -3,6 +3,23 @@ Central configuration for Digital Witness system.
 
 All tunable parameters and paths are defined here to ensure consistency
 across modules and to facilitate hyperparameter adjustment.
+
+Configuration Categories:
+-------------------------
+1. PATH CONFIGURATION - File system paths for data, models, outputs
+2. FEATURE EXTRACTION - Sliding window parameters for temporal analysis
+3. BEHAVIOR CLASSIFICATION - ML model classes
+4. INTENT SCORING - Weights and thresholds for risk assessment
+5. DEEP LEARNING - YOLO, CNN, LSTM hyperparameters
+6. BIAS DETECTION - Fairness and bias mitigation parameters
+7. FORENSIC OUTPUT - Report and evidence package settings
+
+Tuning Guidelines:
+------------------
+- Lower thresholds = more sensitive (more alerts, more false positives)
+- Higher thresholds = less sensitive (fewer alerts, might miss incidents)
+- Weights should sum to 1.0 for proper score normalization
+- Adjust CNN_INPUT_SIZE if using different backbone architectures
 """
 from pathlib import Path
 
@@ -28,15 +45,7 @@ TRAINING_DATA_DIR = DATA_DIR / "training"
 TRAINING_NORMAL_DIR = TRAINING_DATA_DIR / "normal"
 TRAINING_SHOPLIFTING_DIR = TRAINING_DATA_DIR / "shoplifting"
 
-# Model paths
-BEHAVIOR_MODEL_PATH = MODELS_DIR / "behavior_classifier.pkl"
-
-# ============================================================================
-# POSE ESTIMATION (MediaPipe)
-# ============================================================================
-
-POSE_MIN_DETECTION_CONFIDENCE = 0.5  # Minimum confidence to detect a pose
-POSE_MIN_TRACKING_CONFIDENCE = 0.5   # Minimum confidence to track between frames
+# Model paths (deep learning models stored in MODELS_DIR)
 
 # ============================================================================
 # FEATURE EXTRACTION
@@ -101,10 +110,8 @@ CASE_OUTPUT_DIR = OUTPUTS_DIR / "cases"
 # QUALITY ANALYSIS
 # ============================================================================
 
-QUALITY_MIN_POSE_CONFIDENCE = 0.6    # Minimum average landmark visibility
-QUALITY_MIN_DETECTION_RATE = 0.6     # Minimum ratio of frames with poses
-QUALITY_OCCLUSION_THRESHOLD = 0.5    # Occlusion score above = occluded
-QUALITY_MIN_VISIBLE_LANDMARKS = 8    # Minimum visible landmarks for valid pose
+QUALITY_MIN_DETECTION_CONFIDENCE = 0.5  # Minimum detection confidence for quality
+QUALITY_MIN_DETECTION_RATE = 0.6        # Minimum ratio of frames with detections
 
 # ============================================================================
 # EDGE CASE HANDLING

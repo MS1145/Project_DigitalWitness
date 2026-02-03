@@ -4,6 +4,28 @@ YOLO-based object detection for Digital Witness.
 Uses YOLOv8 to detect persons, products, hands, and other retail-relevant
 objects in video frames. Detection results feed into the CNN-LSTM pipeline
 for temporal behavior analysis.
+
+YOLOv8 Overview:
+----------------
+- "You Only Look Once" - single-pass detection (fast!)
+- YOLOv8n = "nano" variant, optimized for speed over accuracy
+- Pretrained on COCO dataset (80 object classes)
+- Built-in tracking via ByteTrack algorithm
+
+Detection Pipeline:
+-------------------
+Frame → YOLOv8 → Bounding Boxes + Class Labels + Confidence Scores
+                          ↓
+              Tracking (ByteTrack maintains IDs across frames)
+                          ↓
+              Interaction Detection (spatial proximity analysis)
+
+Interaction Types:
+------------------
+- "approach": Person within 150px of product
+- "pickup": Product bbox overlaps person bbox 30-80%
+- "hold": Product bbox mostly inside person bbox (>80%)
+- "conceal": Product in lower torso area of person bbox
 """
 import numpy as np
 from dataclasses import dataclass, field
@@ -11,10 +33,10 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 
 from ..config import (
-    YOLO_MODEL_PATH,
-    YOLO_CONF_THRESHOLD,
-    YOLO_CLASSES,
-    YOLO_IOU_THRESHOLD
+    YOLO_MODEL_PATH,       # Path to YOLOv8 weights
+    YOLO_CONF_THRESHOLD,   # 0.5 - minimum detection confidence
+    YOLO_CLASSES,          # Retail-relevant class names
+    YOLO_IOU_THRESHOLD     # 0.5 - for non-max suppression
 )
 
 
@@ -435,23 +457,44 @@ class YOLODetector:
         distance: float,
         overlap: float
     ) -> Optional[str]:
-        """Classify the type of interaction based on spatial features."""
-        # Product is inside person bbox (likely being held/concealed)
+        """
+        Classify the type of interaction based on spatial features.
+
+        Classification Logic (in order of priority):
+        --------------------------------------------
+        1. overlap > 0.8: Product almost entirely within person bbox
+           - If in upper half: "hold" (carrying openly)
+           - If in lower half: "conceal" (hiding in clothing/bag)
+
+        2. overlap > 0.3: Significant overlap = active interaction
+           - Classified as "pickup" (reaching for or grabbing item)
+
+        3. distance < 150px: Close but not touching
+           - Classified as "approach" (moving toward product)
+
+        4. None: No significant spatial relationship
+
+        Note: These thresholds are heuristics. In production, they should
+        be tuned based on camera angles, resolution, and store layout.
+        """
+        # Product is almost entirely inside person bbox
         if overlap > 0.8:
-            # Check if product is in torso area (concealment indicator)
+            # Determine if holding openly (upper body) or concealing (lower body)
             person_center_y = (person.bbox[1] + person.bbox[3]) / 2
             product_center_y = product.center[1]
 
+            # Product in upper half of person = likely holding openly
+            # Product in lower half = likely in pocket, bag, or waistband
             if product_center_y < person_center_y:
                 return "hold"
             else:
                 return "conceal"
 
-        # Product overlaps with person (pickup/interaction)
+        # Significant overlap indicates active manipulation
         elif overlap > 0.3:
             return "pickup"
 
-        # Product is close to person (approach)
+        # Close proximity without contact = approaching
         elif distance < 150:
             return "approach"
 

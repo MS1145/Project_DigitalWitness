@@ -15,7 +15,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from enum import Enum
 import numpy as np
 
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from .quality_analyzer import VideoQualityReport
 from ..config import (
     BIAS_SENSITIVITY,

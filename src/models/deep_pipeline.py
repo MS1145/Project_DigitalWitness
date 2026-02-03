@@ -3,19 +3,34 @@ Deep learning pipeline orchestration for Digital Witness.
 
 Coordinates the YOLO -> CNN -> LSTM flow for end-to-end
 video analysis using deep learning models.
+
+Architecture Overview:
+----------------------
+1. YOLO (Object Detection) - Detects persons and products in each frame
+2. Tracker (ByteTrack) - Maintains object identity across frames
+3. CNN (ResNet18) - Extracts 512-dim spatial features per frame
+4. LSTM (Bidirectional + Attention) - Classifies temporal behavior sequences
+
+Data Flow:
+----------
+Video Frame → YOLO Detection → Object Tracking → CNN Features → LSTM Classification
+                    ↓                 ↓                              ↓
+              Person/Product    Track IDs           Intent: normal/pickup/concealment/bypass
+              Bounding Boxes    Maintained
 """
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 
+# Import deep learning components
 from ..detection.yolo_detector import YOLODetector, Detection, InteractionEvent
 from ..detection.tracker import ObjectTracker, TrackedObject
 from .cnn_feature_extractor import CNNFeatureExtractor, SequenceFeatures
 from .lstm_classifier import LSTMIntentClassifier, IntentPrediction
 from ..config import (
-    LSTM_SEQUENCE_LENGTH,
-    SLIDING_WINDOW_STRIDE
+    LSTM_SEQUENCE_LENGTH,    # Default: 30 frames per sequence (~1 sec at 30fps)
+    SLIDING_WINDOW_STRIDE    # Default: 15 frames overlap between sequences
 )
 
 
@@ -283,22 +298,36 @@ class DeepPipeline:
         features: List[np.ndarray],
         fps: float
     ) -> List[IntentPrediction]:
-        """Classify feature sequences using LSTM."""
+        """
+        Classify feature sequences using LSTM with sliding window approach.
+
+        The sliding window creates overlapping sequences to capture behavior
+        transitions that might span window boundaries.
+
+        Example with 100 frames, seq_length=30, stride=15:
+        - Window 1: frames 0-29
+        - Window 2: frames 15-44  (50% overlap)
+        - Window 3: frames 30-59
+        - ... continues until end of video
+        """
         if not features:
             return []
 
         predictions = []
-        feature_array = np.array(features)
+        feature_array = np.array(features)  # Shape: (num_frames, feature_dim)
         num_frames = len(features)
 
-        # Create sliding windows
+        # Create sliding windows with overlap for temporal continuity
+        # This ensures behaviors spanning window edges are captured
         for start in range(0, num_frames - self.sequence_length + 1, self.stride):
             end = start + self.sequence_length
-            sequence = feature_array[start:end]
+            sequence = feature_array[start:end]  # Shape: (seq_length, feature_dim)
 
+            # Convert frame indices to timestamps for timeline correlation
             start_time = start / fps
             end_time = end / fps
 
+            # LSTM predicts intent class for this temporal window
             prediction = self.lstm.predict_sequence(
                 sequence,
                 sequence_id=f"seq_{start}_{end}",
@@ -313,11 +342,25 @@ class DeepPipeline:
         self,
         predictions: List[IntentPrediction]
     ) -> Tuple[str, float]:
-        """Aggregate sequence predictions to overall intent."""
+        """
+        Aggregate sequence predictions to determine overall video intent.
+
+        Strategy:
+        ---------
+        1. Count occurrences of each intent class across all windows
+        2. Apply 2x weight to suspicious classes (concealment, bypass, shoplifting)
+           to ensure even brief suspicious activity is not drowned out by normal behavior
+        3. If suspicious activity exceeds 30% weighted presence, report the
+           most confident suspicious prediction
+        4. Otherwise, report the most common class with average confidence
+
+        This weighted approach addresses the "needle in haystack" problem where
+        a few seconds of shoplifting would be outvoted by minutes of normal behavior.
+        """
         if not predictions:
             return "normal", 0.0
 
-        # Count by class
+        # Count occurrences of each intent class
         class_counts = {}
         class_confidences = {}
 
@@ -328,7 +371,8 @@ class DeepPipeline:
                 class_confidences[cls] = []
             class_confidences[cls].append(pred.confidence)
 
-        # Weight suspicious classes higher
+        # Apply 2x weight to suspicious classes to prevent normal behavior
+        # from drowning out brief but critical suspicious activity
         suspicious_weight = 2.0
         weighted_counts = {}
 
@@ -338,26 +382,26 @@ class DeepPipeline:
             else:
                 weighted_counts[cls] = count
 
-        # Get dominant class
+        # Calculate normalized scores for each class
         total = sum(weighted_counts.values())
         if total == 0:
             return "normal", 0.0
 
-        # Calculate scores
         class_scores = {
             cls: weighted_counts.get(cls, 0) / total
             for cls in class_counts
         }
 
-        # Determine overall intent
-        # Prioritize suspicious classes if significant presence
+        # Determine overall intent with suspicious activity priority
+        # 30% threshold: if suspicious activity makes up significant portion
         suspicious_classes = ["concealment", "bypass", "shoplifting"]
         suspicious_score = sum(
             class_scores.get(cls, 0) for cls in suspicious_classes
         )
 
         if suspicious_score > 0.3:
-            # Find most confident suspicious class
+            # Report the highest confidence suspicious prediction
+            # This ensures alerts are based on strongest evidence
             suspicious_preds = [
                 p for p in predictions
                 if p.intent_class in suspicious_classes
@@ -366,7 +410,7 @@ class DeepPipeline:
                 most_confident = max(suspicious_preds, key=lambda p: p.confidence)
                 return most_confident.intent_class, most_confident.confidence
 
-        # Otherwise, use most common class
+        # No significant suspicious activity - report dominant class
         overall_class = max(class_counts, key=class_counts.get)
         avg_confidence = np.mean(class_confidences[overall_class])
 

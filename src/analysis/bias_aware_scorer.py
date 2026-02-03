@@ -12,7 +12,7 @@ from .intent_scorer import IntentScorer, IntentScore, Severity
 from .cross_checker import DiscrepancyReport
 from .bias_detector import BiasDetector, FairnessReport, BiasRiskLevel
 from .quality_analyzer import VideoQualityReport
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..config import (
     WEIGHT_DISCREPANCY,
     WEIGHT_CONCEALMENT,

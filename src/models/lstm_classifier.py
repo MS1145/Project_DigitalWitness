@@ -3,6 +3,25 @@ LSTM-based temporal intent classifier for Digital Witness.
 
 Uses LSTM networks to model temporal patterns in feature sequences
 for classifying shopping intent: normal, suspicious, shoplifting.
+
+Architecture:
+-------------
+- Input: Sequence of CNN features (seq_len, 512)
+- Bidirectional LSTM: Captures both past and future context
+- Attention Layer: Learns which frames are most important for classification
+- Output: 4-class probability distribution (normal, pickup, concealment, bypass)
+
+Why Bidirectional LSTM?
+-----------------------
+Retail behaviors often require understanding both what came before AND after
+a specific action. For example, "pickup" followed by "concealment" vs "pickup"
+followed by "putback" have very different implications.
+
+Why Attention?
+--------------
+Not all frames contribute equally to intent classification. The attention
+mechanism learns to focus on critical moments (e.g., the exact frame where
+an item is concealed) while downweighting less informative frames.
 """
 import numpy as np
 from dataclasses import dataclass, field
@@ -10,11 +29,11 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 
 from ..config import (
-    LSTM_HIDDEN_DIM,
-    LSTM_NUM_LAYERS,
-    LSTM_SEQUENCE_LENGTH,
-    LSTM_DROPOUT,
-    INTENT_CLASSES,
+    LSTM_HIDDEN_DIM,      # Hidden state size (256)
+    LSTM_NUM_LAYERS,      # Number of stacked LSTM layers (2)
+    LSTM_SEQUENCE_LENGTH, # Frames per sequence (30)
+    LSTM_DROPOUT,         # Dropout for regularization (0.3)
+    INTENT_CLASSES,       # ["normal", "pickup", "concealment", "bypass"]
     MODELS_DIR
 )
 
@@ -429,7 +448,28 @@ class LSTMIntentClassifier:
 
 
 class LSTMModel:
-    """PyTorch LSTM model (defined separately to avoid torch import at module level)."""
+    """
+    PyTorch LSTM model with attention mechanism.
+
+    Defined separately to avoid torch import at module level (lazy loading).
+    Uses __new__ pattern to return the actual PyTorch module when instantiated.
+
+    Network Architecture:
+    ---------------------
+    Input (batch, seq_len, 512)
+           ↓
+    Bidirectional LSTM (2 layers)
+           ↓
+    Output (batch, seq_len, 512)  # hidden_dim * 2 for bidirectional
+           ↓
+    Attention Mechanism
+           ↓
+    Context Vector (batch, 512)
+           ↓
+    Fully Connected Layers
+           ↓
+    Class Logits (batch, 4)
+    """
 
     def __new__(cls, *args, **kwargs):
         import torch
@@ -451,47 +491,73 @@ class LSTMModel:
                 self.num_layers = num_layers
                 self.bidirectional = bidirectional
 
-                # LSTM layer
+                # =============================================================
+                # LSTM Layer: Processes sequence temporally
+                # Bidirectional means it processes both forward and backward,
+                # doubling the output dimension but capturing full context
+                # =============================================================
                 self.lstm = nn.LSTM(
-                    input_size=input_dim,
-                    hidden_size=hidden_dim,
-                    num_layers=num_layers,
-                    batch_first=True,
-                    dropout=dropout if num_layers > 1 else 0,
-                    bidirectional=bidirectional
+                    input_size=input_dim,        # 512 from CNN features
+                    hidden_size=hidden_dim,      # 256 hidden units
+                    num_layers=num_layers,       # 2 stacked layers
+                    batch_first=True,            # Input shape: (batch, seq, features)
+                    dropout=dropout if num_layers > 1 else 0,  # Between LSTM layers
+                    bidirectional=bidirectional  # Forward + backward = 512 output
                 )
 
-                # Attention layer
+                # =============================================================
+                # Attention Layer: Learns which frames matter most
+                # Computes a weight for each timestep, then creates weighted sum
+                # This allows the model to "focus" on important moments
+                # =============================================================
                 attention_dim = hidden_dim * 2 if bidirectional else hidden_dim
                 self.attention = nn.Sequential(
-                    nn.Linear(attention_dim, attention_dim // 2),
-                    nn.Tanh(),
-                    nn.Linear(attention_dim // 2, 1)
+                    nn.Linear(attention_dim, attention_dim // 2),  # 512 -> 256
+                    nn.Tanh(),                                      # Non-linearity
+                    nn.Linear(attention_dim // 2, 1)               # 256 -> 1 (score per frame)
                 )
 
-                # Output layer
+                # =============================================================
+                # Output Layer: Maps context vector to class predictions
+                # Dropout helps prevent overfitting on training data
+                # =============================================================
                 self.fc = nn.Sequential(
-                    nn.Dropout(dropout),
-                    nn.Linear(attention_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, num_classes)
+                    nn.Dropout(dropout),                           # Regularization
+                    nn.Linear(attention_dim, hidden_dim),          # 512 -> 256
+                    nn.ReLU(),                                     # Non-linearity
+                    nn.Dropout(dropout),                           # More regularization
+                    nn.Linear(hidden_dim, num_classes)             # 256 -> 4 classes
                 )
 
             def forward(self, x):
-                # LSTM forward
-                lstm_out, _ = self.lstm(x)  # (batch, seq_len, hidden*directions)
+                """
+                Forward pass through the network.
 
-                # Attention
+                Args:
+                    x: Input tensor of shape (batch, seq_len, input_dim)
+
+                Returns:
+                    output: Class logits (batch, num_classes)
+                    attention_weights: Per-frame attention weights (batch, seq_len)
+                """
+                # Process sequence through bidirectional LSTM
+                # lstm_out contains hidden states for each timestep
+                lstm_out, _ = self.lstm(x)  # (batch, seq_len, hidden*2)
+
+                # Compute attention scores for each frame
+                # Higher scores = more important for classification
                 attention_weights = self.attention(lstm_out)  # (batch, seq_len, 1)
-                attention_weights = torch.softmax(attention_weights, dim=1)
+                attention_weights = torch.softmax(attention_weights, dim=1)  # Normalize to sum=1
 
-                # Weighted sum
-                context = torch.sum(attention_weights * lstm_out, dim=1)  # (batch, hidden*directions)
+                # Create context vector as weighted sum of LSTM outputs
+                # Frames with higher attention contribute more to final representation
+                context = torch.sum(attention_weights * lstm_out, dim=1)  # (batch, hidden*2)
 
-                # Output
-                output = self.fc(context)
+                # Map context to class predictions
+                output = self.fc(context)  # (batch, num_classes)
 
+                # Return both predictions and attention weights
+                # Attention weights enable explainability (which frames mattered)
                 return output, attention_weights.squeeze(-1)
 
         return _LSTMModel(*args, **kwargs)

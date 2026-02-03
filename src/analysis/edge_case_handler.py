@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 
 from .quality_analyzer import VideoQualityReport, FrameQualityMetrics
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..config import (
     EDGE_CASE_MIN_CONFIDENCE,
     EDGE_CASE_MIN_QUALITY,

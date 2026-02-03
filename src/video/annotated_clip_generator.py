@@ -2,11 +2,11 @@
 Annotated clip generation for Digital Witness.
 
 Generates video clips with visual overlays including:
-- Pose skeleton visualization
 - Behavior labels
 - Confidence indicators
 - Timestamp overlays
 - Event highlighting
+- Detection bounding boxes
 
 These annotated clips provide clear forensic evidence for review.
 """
@@ -16,8 +16,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple, Any
 from pathlib import Path
 
-from ..pose.estimator import PoseResult, LANDMARK_NAMES
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..config import (
     CLIP_OUTPUT_DIR,
     ANNOTATION_COLORS,
@@ -29,13 +28,11 @@ from ..config import (
 @dataclass
 class AnnotationConfig:
     """Configuration for clip annotations."""
-    show_pose_skeleton: bool = True
     show_behavior_label: bool = True
     show_confidence_bar: bool = True
     show_timestamp: bool = True
     show_frame_number: bool = True
     highlight_suspicious: bool = True
-    skeleton_thickness: int = 2
     label_font_scale: float = 0.7
     label_padding: int = 10
 
@@ -61,18 +58,6 @@ class AnnotatedClipGenerator:
     that help reviewers understand what the system detected.
     """
 
-    # Skeleton connections for visualization
-    SKELETON_CONNECTIONS = [
-        ("left_shoulder", "right_shoulder"),
-        ("left_shoulder", "left_elbow"),
-        ("left_elbow", "left_wrist"),
-        ("right_shoulder", "right_elbow"),
-        ("right_elbow", "right_wrist"),
-        ("left_shoulder", "left_hip"),
-        ("right_shoulder", "right_hip"),
-        ("left_hip", "right_hip"),
-    ]
-
     def __init__(
         self,
         output_dir: Optional[Path] = None,
@@ -88,16 +73,14 @@ class AnnotatedClipGenerator:
         self.output_dir = output_dir or CLIP_OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.config = config or AnnotationConfig()
-
-        # Color scheme
         self.colors = ANNOTATION_COLORS
 
     def generate_clip(
         self,
         video_path: Path,
         event: BehaviorEvent,
-        pose_results: List[PoseResult],
         clip_id: str,
+        detections: Optional[List] = None,
         buffer_before: float = CLIP_BUFFER_BEFORE,
         buffer_after: float = CLIP_BUFFER_AFTER
     ) -> Optional[AnnotatedClip]:
@@ -107,8 +90,8 @@ class AnnotatedClipGenerator:
         Args:
             video_path: Source video path
             event: Behavior event to clip
-            pose_results: Pose estimation results
             clip_id: Unique identifier for clip
+            detections: Optional list of detection bboxes to draw
             buffer_before: Seconds of context before event
             buffer_after: Seconds of context after event
 
@@ -130,9 +113,6 @@ class AnnotatedClipGenerator:
         start_frame = int(start_time * fps)
         end_frame = int(end_time * fps)
 
-        # Build pose lookup by frame number
-        pose_by_frame = {pr.frame_number: pr for pr in pose_results}
-
         # Setup output
         output_path = self.output_dir / f"annotated_{clip_id}_{event.behavior_type}.mp4"
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -149,17 +129,10 @@ class AnnotatedClipGenerator:
                 break
 
             timestamp = frame_num / fps
-            pose = pose_by_frame.get(frame_num)
 
             # Apply annotations
             annotated_frame = self._annotate_frame(
-                frame,
-                pose,
-                event,
-                timestamp,
-                frame_num,
-                width,
-                height
+                frame, event, timestamp, frame_num, width, height
             )
 
             out.write(annotated_frame)
@@ -169,8 +142,6 @@ class AnnotatedClipGenerator:
         out.release()
 
         # Track which annotations were applied
-        if self.config.show_pose_skeleton:
-            annotations_applied.append("pose_skeleton")
         if self.config.show_behavior_label:
             annotations_applied.append("behavior_label")
         if self.config.show_confidence_bar:
@@ -192,7 +163,6 @@ class AnnotatedClipGenerator:
     def _annotate_frame(
         self,
         frame: np.ndarray,
-        pose: Optional[PoseResult],
         event: BehaviorEvent,
         timestamp: float,
         frame_num: int,
@@ -205,22 +175,17 @@ class AnnotatedClipGenerator:
         # Check if we're in the event time range
         in_event = event.start_time <= timestamp <= event.end_time
 
-        # Highlight suspicious frames
+        # Highlight suspicious frames with colored border
         if self.config.highlight_suspicious and in_event:
             if event.behavior_type in ["concealment", "bypass", "shoplifting"]:
-                # Add red border
                 cv2.rectangle(annotated, (0, 0), (width-1, height-1),
-                            (0, 0, 255), 5)
+                            (0, 0, 255), 5)  # Red border
 
-        # Draw pose skeleton
-        if self.config.show_pose_skeleton and pose and pose.landmarks:
-            self._draw_skeleton(annotated, pose, width, height)
-
-        # Draw behavior label
+        # Draw behavior label at top
         if self.config.show_behavior_label:
             self._draw_behavior_label(annotated, event, in_event, width)
 
-        # Draw confidence bar
+        # Draw confidence bar at bottom
         if self.config.show_confidence_bar:
             self._draw_confidence_bar(annotated, event.confidence, width, height)
 
@@ -234,47 +199,6 @@ class AnnotatedClipGenerator:
 
         return annotated
 
-    def _draw_skeleton(
-        self,
-        frame: np.ndarray,
-        pose: PoseResult,
-        width: int,
-        height: int
-    ):
-        """Draw pose skeleton on frame."""
-        landmarks = pose.landmarks
-        if not landmarks:
-            return
-
-        # Get color based on visibility
-        def get_point_color(landmark):
-            if landmark.visibility > 0.7:
-                return (0, 255, 0)  # Green - high confidence
-            elif landmark.visibility > 0.5:
-                return (0, 255, 255)  # Yellow - medium confidence
-            else:
-                return (0, 0, 255)  # Red - low confidence
-
-        # Draw points
-        for name, lm in landmarks.items():
-            x = int(lm.x * width)
-            y = int(lm.y * height)
-            color = get_point_color(lm)
-            cv2.circle(frame, (x, y), 5, color, -1)
-
-        # Draw connections
-        for start_name, end_name in self.SKELETON_CONNECTIONS:
-            if start_name in landmarks and end_name in landmarks:
-                start = landmarks[start_name]
-                end = landmarks[end_name]
-
-                # Only draw if both points visible
-                if start.visibility > 0.3 and end.visibility > 0.3:
-                    pt1 = (int(start.x * width), int(start.y * height))
-                    pt2 = (int(end.x * width), int(end.y * height))
-                    cv2.line(frame, pt1, pt2, (255, 255, 255),
-                            self.config.skeleton_thickness)
-
     def _draw_behavior_label(
         self,
         frame: np.ndarray,
@@ -285,11 +209,8 @@ class AnnotatedClipGenerator:
         """Draw behavior label at top of frame."""
         behavior = event.behavior_type.upper()
         confidence = event.confidence
-
-        # Get color for behavior
         color = self.colors.get(event.behavior_type, (255, 255, 255))
 
-        # Background
         label_text = f"{behavior} ({confidence:.0%})"
         (text_width, text_height), _ = cv2.getTextSize(
             label_text, cv2.FONT_HERSHEY_SIMPLEX,
@@ -306,15 +227,12 @@ class AnnotatedClipGenerator:
 
         # Draw background
         if in_event:
-            cv2.rectangle(frame, (x, y), (x + bg_width, y + bg_height),
-                         color, -1)
-            text_color = (0, 0, 0)  # Black text on colored background
+            cv2.rectangle(frame, (x, y), (x + bg_width, y + bg_height), color, -1)
+            text_color = (0, 0, 0)
         else:
-            cv2.rectangle(frame, (x, y), (x + bg_width, y + bg_height),
-                         (50, 50, 50), -1)
+            cv2.rectangle(frame, (x, y), (x + bg_width, y + bg_height), (50, 50, 50), -1)
             text_color = (200, 200, 200)
 
-        # Draw text
         cv2.putText(frame, label_text,
                    (x + padding, y + text_height + padding // 2),
                    cv2.FONT_HERSHEY_SIMPLEX, self.config.label_font_scale,
@@ -335,23 +253,20 @@ class AnnotatedClipGenerator:
 
         # Background
         cv2.rectangle(frame, (bar_x, bar_y),
-                     (bar_x + bar_width, bar_y + bar_height),
-                     (50, 50, 50), -1)
+                     (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
 
-        # Filled portion
+        # Filled portion with color based on risk level
         filled_width = int(bar_width * confidence)
         if confidence >= 0.7:
-            fill_color = (0, 0, 255)  # Red - high risk
+            fill_color = (0, 0, 255)    # Red - high risk
         elif confidence >= 0.5:
-            fill_color = (0, 165, 255)  # Orange - medium
+            fill_color = (0, 165, 255)  # Orange - medium risk
         else:
-            fill_color = (0, 255, 0)  # Green - low
+            fill_color = (0, 255, 0)    # Green - low risk
 
         cv2.rectangle(frame, (bar_x, bar_y),
-                     (bar_x + filled_width, bar_y + bar_height),
-                     fill_color, -1)
+                     (bar_x + filled_width, bar_y + bar_height), fill_color, -1)
 
-        # Label
         cv2.putText(frame, f"Confidence: {confidence:.0%}",
                    (bar_x + 5, bar_y - 5),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -361,7 +276,6 @@ class AnnotatedClipGenerator:
         minutes = int(timestamp // 60)
         seconds = timestamp % 60
         time_str = f"{minutes:02d}:{seconds:05.2f}"
-
         cv2.putText(frame, time_str, (10, height - 50),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
@@ -374,7 +288,6 @@ class AnnotatedClipGenerator:
         self,
         video_path: Path,
         events: List[BehaviorEvent],
-        pose_results: List[PoseResult],
         max_clips: int = 10,
         filter_suspicious: bool = True
     ) -> List[AnnotatedClip]:
@@ -384,14 +297,12 @@ class AnnotatedClipGenerator:
         Args:
             video_path: Source video path
             events: List of behavior events
-            pose_results: Pose estimation results
             max_clips: Maximum clips to generate
             filter_suspicious: Only generate for suspicious events
 
         Returns:
             List of AnnotatedClip objects
         """
-        # Filter events
         if filter_suspicious:
             suspicious_types = {"pickup", "concealment", "bypass", "shoplifting"}
             events = [e for e in events if e.behavior_type in suspicious_types]
@@ -401,12 +312,7 @@ class AnnotatedClipGenerator:
 
         clips = []
         for i, event in enumerate(events):
-            clip = self.generate_clip(
-                video_path,
-                event,
-                pose_results,
-                clip_id=f"{i:03d}"
-            )
+            clip = self.generate_clip(video_path, event, clip_id=f"{i:03d}")
             if clip:
                 clips.append(clip)
 
@@ -416,8 +322,7 @@ class AnnotatedClipGenerator:
         self,
         video_path: Path,
         timestamp: float,
-        pose: Optional[PoseResult],
-        event: Optional[BehaviorEvent],
+        event: Optional[BehaviorEvent] = None,
         output_path: Optional[Path] = None
     ) -> Optional[Path]:
         """Generate a single annotated screenshot."""
@@ -438,16 +343,14 @@ class AnnotatedClipGenerator:
         if not ret:
             return None
 
-        # Annotate
+        # Annotate if event provided
         if event:
-            in_event = event.start_time <= timestamp <= event.end_time
             annotated = self._annotate_frame(
-                frame, pose, event, timestamp, frame_num, width, height
+                frame, event, timestamp, frame_num, width, height
             )
         else:
             annotated = frame
 
-        # Save
         if output_path is None:
             output_path = self.output_dir / f"screenshot_{timestamp:.2f}.jpg"
 

@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from .intent_scorer import IntentScore, Severity
 from .cross_checker import DiscrepancyReport
-from ..pose.behavior_classifier import BehaviorEvent
+from ..models.behavior_event import BehaviorEvent
 from ..video.clip_extractor import ExtractedClip
 from ..config import ALERT_THRESHOLD
 

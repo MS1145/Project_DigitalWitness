@@ -58,7 +58,6 @@ def run_pipeline(
     from .analysis.bias_aware_scorer import BiasAwareScorer
     from .analysis.edge_case_handler import EdgeCaseHandler
     from .output.evidence_compiler import EvidenceCompiler
-    from .pose.estimator import PoseEstimator
 
     video_path = video_path or DEFAULT_VIDEO_PATH
     pos_path = pos_path or DEFAULT_POS_PATH
@@ -129,20 +128,10 @@ def run_pipeline(
     metadata = video_loader.metadata
     results["video_metadata"] = metadata
 
-    # Step 5: Run pose estimation for quality analysis
-    update_progress(0.62, "Running quality analysis...")
-    pose_results = []
-    with video_loader:
-        with PoseEstimator() as estimator:
-            for frame_num, frame in video_loader.frames(step=4):  # Sparse sampling
-                result = estimator.process_frame(frame, frame_num, metadata.fps)
-                pose_results.append(result)
-    results["pose_results"] = pose_results
-
-    # Step 6: Quality analysis
-    update_progress(0.68, "Assessing video quality...")
+    # Step 5: Quality analysis based on deep pipeline results
+    update_progress(0.65, "Assessing video quality...")
     quality_analyzer = QualityAnalyzer()
-    quality_report = quality_analyzer.analyze_sequence(pose_results, metadata.fps)
+    quality_report = quality_analyzer.analyze_from_deep_result(deep_result, metadata.fps)
     print(f"\n  Quality Analysis:")
     print(f"  - Detection rate: {quality_report.pose_detection_rate:.1%}")
     print(f"  - Quality score: {quality_report.overall_quality_score:.2f}")
@@ -193,7 +182,7 @@ def run_pipeline(
 
     # Step 9: Convert deep predictions to behavior events
     update_progress(0.78, "Processing behavior predictions...")
-    from .pose.behavior_classifier import BehaviorEvent
+    from .models.behavior_event import BehaviorEvent
 
     behavior_events = []
     for pred in deep_result.intent_predictions:
@@ -415,7 +404,7 @@ def run_demo_mode(pos_path: Optional[Path] = None) -> dict:
     print("  DEMO MODE - Simulated Analysis")
     print("=" * 60)
 
-    from .pose.behavior_classifier import BehaviorEvent
+    from .models.behavior_event import BehaviorEvent
     from .video.loader import VideoMetadata
     from .analysis.intent_scorer import IntentScorer
 

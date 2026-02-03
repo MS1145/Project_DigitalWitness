@@ -4,6 +4,22 @@ CNN-based spatial feature extraction for Digital Witness.
 Uses a pretrained CNN backbone (ResNet18 by default) to extract
 spatial features from video frames. These features capture visual
 appearance and spatial relationships that complement pose estimation.
+
+Why ResNet18?
+-------------
+- Pretrained on ImageNet: Already knows how to recognize objects, textures, shapes
+- 512-dimensional output: Rich but compact representation
+- Fast inference: ~5ms per frame on GPU, enabling near real-time processing
+- Transfer learning: Retail/surveillance domain shares visual primitives with ImageNet
+
+Feature Extraction Process:
+---------------------------
+1. Resize frame to 224x224 (ImageNet standard)
+2. Normalize using ImageNet mean/std
+3. Pass through ResNet18 (without final classification layer)
+4. Output: 512-dimensional feature vector capturing visual semantics
+
+These features become input to the LSTM for temporal modeling.
 """
 import numpy as np
 from dataclasses import dataclass
@@ -11,10 +27,10 @@ from typing import List, Optional, Tuple, Union
 from pathlib import Path
 
 from ..config import (
-    CNN_BACKBONE,
-    CNN_FEATURE_DIM,
-    CNN_PRETRAINED,
-    CNN_INPUT_SIZE
+    CNN_BACKBONE,      # "resnet18" by default
+    CNN_FEATURE_DIM,   # 512 dimensions
+    CNN_PRETRAINED,    # True - use ImageNet weights
+    CNN_INPUT_SIZE     # (224, 224) pixels
 )
 
 
