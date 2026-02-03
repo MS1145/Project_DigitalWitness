@@ -1,31 +1,22 @@
-# Core dependencies
+# Core
 opencv-python-headless
 mediapipe
 numpy
 pandas
 matplotlib
 scikit-learn
+Pillow
+joblib
+
+# Web UI
 streamlit>=1.32.0
 altair>=5.0.0,<6.0.0
 plotly
-joblib
-Pillow
 
-<<<<<<< HEAD
-# Phase 2: Real-time and API dependencies
-fastapi>=0.104.0
-uvicorn>=0.24.0
-pydantic>=2.0.0
-python-multipart>=0.0.6
-=======
-# Deep Learning (YOLO + CNN + LSTM)
+# Deep Learning
 torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.0.0
 
-# Report Generation
+# Reports
 reportlab>=4.0.0
-
-# Optional: SHAP for explainability (commented out - heavy dependency)
-# shap>=0.42.0
->>>>>>> MVP
