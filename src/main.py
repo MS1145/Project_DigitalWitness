@@ -58,10 +58,12 @@ def run_pipeline(
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     # Run deep learning analysis
+    # frame_step=3 for faster processing on CPU (cloud deployment)
+    # Change to frame_step=1 for maximum accuracy on GPU
     update_progress(0.05, "Processing video...")
     deep_result = pipeline.process_video(
         str(video_path),
-        frame_step=1,
+        frame_step=3,
         progress_callback=lambda p, m: update_progress(0.05 + p * 0.55, m),
         store_frame_analyses=False
     )

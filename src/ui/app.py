@@ -251,7 +251,72 @@ def analyze_video_deep(video_path, progress_callback=None):
         progress_callback=progress_callback
     )
 
+    # Store original video path for forensic extraction
+    results['_video_path'] = video_path
+
     return results
+
+
+def extract_suspicious_frames(video_path, behavior_events, max_frames=5):
+    """
+    Extract frames from suspicious segments of the video.
+
+    Args:
+        video_path: Path to the video file
+        behavior_events: List of behavior events from analysis
+        max_frames: Maximum number of frames to extract
+
+    Returns:
+        List of (frame_image, timestamp, behavior_type) tuples
+    """
+    import cv2
+
+    # Find suspicious events
+    suspicious_events = [
+        e for e in behavior_events
+        if e.get('behavior_type') in ['shoplifting', 'concealment', 'bypass']
+        and e.get('confidence', 0) > 0.5
+    ]
+
+    if not suspicious_events:
+        return []
+
+    # Sort by confidence (highest first)
+    suspicious_events.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+    suspicious_events = suspicious_events[:max_frames]
+
+    frames = []
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        return []
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+
+    for event in suspicious_events:
+        # Get middle of the event
+        start_time = event.get('start_time', 0)
+        end_time = event.get('end_time', start_time + 1)
+        mid_time = (start_time + end_time) / 2
+
+        frame_num = int(mid_time * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+
+        ret, frame = cap.read()
+        if ret:
+            # Convert BGR to RGB for display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append({
+                'image': frame_rgb,
+                'timestamp': mid_time,
+                'behavior': event.get('behavior_type', 'unknown'),
+                'confidence': event.get('confidence', 0),
+                'start_time': start_time,
+                'end_time': end_time
+            })
+
+    cap.release()
+    return frames
 
 
 # ============== UI COMPONENTS ==============
@@ -853,6 +918,48 @@ def render_analysis_results(results):
 
     st.markdown("---")
 
+    # ========== FORENSIC EVIDENCE SECTION ==========
+    lstm_detection = results.get('lstm_detection', {})
+    is_shoplifting = lstm_detection.get('is_shoplifting', False)
+
+    if is_shoplifting:
+        st.markdown("### Forensic Evidence")
+        st.markdown("Key frames from suspicious segments detected by the LSTM model.")
+
+        # Get pre-extracted suspicious frames
+        suspicious_frames = results.get('suspicious_frames', [])
+
+        if suspicious_frames:
+            # Display frames in a grid
+            num_frames = len(suspicious_frames)
+            cols = st.columns(min(num_frames, 4))
+
+            for i, frame_data in enumerate(suspicious_frames):
+                with cols[i % 4]:
+                    st.image(
+                        frame_data['image'],
+                        caption=f"{frame_data['behavior'].upper()}\n"
+                                f"Time: {frame_data['timestamp']:.1f}s\n"
+                                f"Confidence: {frame_data['confidence']:.0%}",
+                        use_container_width=True
+                    )
+
+            # Show detailed info in expander
+            with st.expander("View Suspicious Segment Details"):
+                for i, frame_data in enumerate(suspicious_frames):
+                    st.markdown(f"""
+                    **Segment {i+1}:**
+                    - Behavior: `{frame_data['behavior']}`
+                    - Time Range: {frame_data['start_time']:.1f}s - {frame_data['end_time']:.1f}s
+                    - Confidence: {frame_data['confidence']:.1%}
+                    """)
+                    if i < len(suspicious_frames) - 1:
+                        st.markdown("---")
+        else:
+            st.info("No suspicious frames could be extracted. This may happen if the video quality is low or the suspicious segments are very brief.")
+
+        st.markdown("---")
+
     # Quality Analysis
     col1, col2 = st.columns(2)
 
@@ -909,13 +1016,52 @@ def render_analysis_results(results):
             fig.update_layout(height=200, margin=dict(l=20, r=20, t=50, b=20))
             st.plotly_chart(fig, use_container_width=True)
 
-            bias_flags = bias_report.get('flags', [])
-            if bias_flags:
-                st.warning("Bias Concerns:")
-                for flag in bias_flags:
-                    st.write(f"- {flag}")
-            else:
-                st.success("No significant bias detected")
+            # Collapsible detailed bias assessment
+            with st.expander("View Detailed Bias Assessment"):
+                st.markdown("#### Bias-Aware Intent Assessment")
+
+                # Get detailed info from intent_score
+                intent_info = results.get('intent_score', {})
+                components = intent_info.get('components', {})
+
+                st.markdown(f"""
+                **Final Score:** {intent_info.get('score', 0):.2f} ({intent_info.get('severity', 'N/A')})
+
+                **Analysis Confidence:** {'HIGH' if fairness_score > 0.75 else 'MEDIUM' if fairness_score > 0.5 else 'LOW'}
+                """)
+
+                st.markdown("---")
+                st.markdown("##### Scoring Breakdown")
+
+                if components:
+                    for comp_name, comp_value in components.items():
+                        weight = {'discrepancy': 40, 'concealment': 30, 'bypass': 20, 'duration': 10}.get(comp_name, 0)
+                        st.markdown(f"- **{comp_name}:** {comp_value:.2f} (weight: {weight}%)")
+
+                st.markdown("---")
+                st.markdown("##### Fairness Assessment")
+                st.markdown(f"- **Fairness Score:** {fairness_score:.1%}")
+                st.markdown(f"- **Analysis Reliable:** {'Yes' if bias_report.get('analysis_reliable', True) else 'No'}")
+                st.markdown(f"- **Manual Review Required:** {'Yes' if bias_report.get('requires_review', False) else 'No'}")
+
+                # Bias flags
+                bias_flags = bias_report.get('flags', [])
+                if bias_flags:
+                    st.markdown("---")
+                    st.markdown("##### Bias Indicators")
+                    for flag in bias_flags:
+                        st.warning(f"- {flag}")
+
+                st.markdown("---")
+                st.markdown("##### Recommendations")
+                st.info("""
+                - All alerts require human validation before any action is taken
+                - Consider re-analyzing with better quality video footage if quality is low
+                - Manually review suspicious segments to verify accuracy
+                """)
+
+                if bias_report.get('requires_review', False):
+                    st.error("**MANUAL REVIEW REQUIRED** - Bias indicators warrant additional scrutiny.")
         else:
             st.info("Bias analysis not available")
 
@@ -1168,6 +1314,13 @@ def main():
                             video_path,
                             progress_callback=update_progress
                         )
+
+                        # Extract suspicious frames BEFORE deleting temp file
+                        if results.get('success', False):
+                            behavior_events = results.get('behavior_events', [])
+                            suspicious_frames = extract_suspicious_frames(video_path, behavior_events, max_frames=4)
+                            results['suspicious_frames'] = suspicious_frames
+
                     except Exception as e:
                         results = {
                             'success': False,

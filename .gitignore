@@ -29,9 +29,13 @@ data/training/shoplifting/*.mp4
 data/videos/*.mp4
 data/videos/*.avi
 
-# Generated model files (can be regenerated via python train.py)
-models/behavior_classifier.pkl
+# Model files (large - download separately or use Git LFS)
+models/*.pt
+models/*.pkl
 models/video_processing_log.json
+
+# Training notebook outputs
+models/*.ipynb
 
 # Keep visualization PNGs for reference but they can be regenerated
 # models/*.png
