@@ -1036,7 +1036,11 @@ def render_analysis_results(results):
                 if components:
                     for comp_name, comp_value in components.items():
                         weight = {'discrepancy': 40, 'concealment': 30, 'bypass': 20, 'duration': 10}.get(comp_name, 0)
-                        st.markdown(f"- **{comp_name}:** {comp_value:.2f} (weight: {weight}%)")
+                        # Handle non-numeric values
+                        if isinstance(comp_value, (int, float)):
+                            st.markdown(f"- **{comp_name}:** {comp_value:.2f} (weight: {weight}%)")
+                        else:
+                            st.markdown(f"- **{comp_name}:** {comp_value} (weight: {weight}%)")
 
                 st.markdown("---")
                 st.markdown("##### Fairness Assessment")
