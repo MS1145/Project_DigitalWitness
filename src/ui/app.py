@@ -848,8 +848,9 @@ def render_analysis_results(results):
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**Explanation:**")
-        st.info(intent_score.get('explanation', 'No explanation available'))
+        with st.expander("View Bias-Aware Intent Assessment Explanation"):
+            explanation = intent_score.get('explanation', 'No explanation available')
+            st.info(explanation)
 
     st.markdown("---")
 
