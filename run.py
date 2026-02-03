@@ -104,8 +104,13 @@ def run_training():
     """
     Execute the deep learning model training pipeline.
 
+<<<<<<< HEAD
+    Delegates to training module which processes videos
+    from data/training/ and saves the trained model to models/.
+=======
     Trains the LSTM classifier using CNN-extracted features from video data.
     Requires training videos in data/training/normal/ and data/training/shoplifting/
+>>>>>>> MVP
     """
     print_banner()
     print("[MODE] Deep Learning Model Training\n")
@@ -114,7 +119,12 @@ def run_training():
     print("  - Sequence classification: Bidirectional LSTM")
     print()
 
+<<<<<<< HEAD
+    # Lazy import to avoid loading ML dependencies until needed
+    from src.training import main as train_main
+=======
     from src.models.train_deep_model import main as train_main
+>>>>>>> MVP
     result = train_main()
 
     if result.get('success'):
@@ -141,6 +151,13 @@ def run_evaluation():
     print("  - Generating: Confusion Matrix")
     print()
 
+<<<<<<< HEAD
+    # Model bootstrap: train model if none exists
+    if not BEHAVIOR_MODEL_PATH.exists():
+        print("[SETUP] No model found. Please train the model first.\n")
+        print("Run: python run.py --train\n")
+        return
+=======
     from src.models.train_deep_model import evaluate_model
     result = evaluate_model()
 
@@ -163,6 +180,7 @@ def run_analysis(video_path=None):
     """
     print_banner()
     print("[MODE] Video Analysis\n")
+>>>>>>> MVP
 
     # Auto-discover video file if not specified
     if video_path is None:

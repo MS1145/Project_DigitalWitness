@@ -21,6 +21,7 @@ Tuning Guidelines:
 - Weights should sum to 1.0 for proper score normalization
 - Adjust CNN_INPUT_SIZE if using different backbone architectures
 """
+import os
 from pathlib import Path
 
 # ============================================================================
@@ -107,6 +108,56 @@ ALERT_THRESHOLD = INTENT_THRESHOLD_MEDIUM
 CASE_OUTPUT_DIR = OUTPUTS_DIR / "cases"
 
 # ============================================================================
+<<<<<<< HEAD
+# RTSP STREAMING (Phase 2)
+# ============================================================================
+
+RTSP_BUFFER_SIZE = 30              # Frames to buffer for smooth playback
+RTSP_RECONNECT_DELAY = 5.0         # Seconds between reconnection attempts
+RTSP_TIMEOUT = 10.0                # Connection timeout in seconds
+RTSP_DEFAULT_FPS = 30.0            # Assumed FPS when stream doesn't report
+
+# ============================================================================
+# POS SIMULATOR (Phase 2)
+# ============================================================================
+
+POS_WEBHOOK_PORT = 5001            # Port for webhook API demo
+POS_WEBHOOK_HOST = "0.0.0.0"       # Host for webhook API
+
+# Product catalog for POS simulator
+POS_PRODUCT_CATALOG = [
+    {"sku": "ITEM001", "name": "Chocolate Bar", "price": 2.99},
+    {"sku": "ITEM002", "name": "Energy Drink", "price": 3.49},
+    {"sku": "ITEM003", "name": "Snack Pack", "price": 4.99},
+    {"sku": "ITEM004", "name": "Bottled Water", "price": 1.49},
+    {"sku": "ITEM005", "name": "Chewing Gum", "price": 1.99},
+    {"sku": "ITEM006", "name": "Protein Bar", "price": 3.99},
+    {"sku": "ITEM007", "name": "Soda Can", "price": 1.79},
+    {"sku": "ITEM008", "name": "Candy Pack", "price": 2.49},
+    {"sku": "ITEM009", "name": "Coffee Cup", "price": 2.99},
+    {"sku": "ITEM010", "name": "Sandwich", "price": 5.99},
+]
+
+# ============================================================================
+# EMAIL NOTIFICATION (Phase 2)
+# ============================================================================
+
+EMAIL_SMTP_SERVER = "smtp.gmail.com"
+EMAIL_SMTP_PORT = 587
+EMAIL_USE_TLS = True
+# Read from environment variables for security
+EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")  # Gmail App Password
+EMAIL_RECIPIENTS = os.environ.get("EMAIL_RECIPIENTS", "").split(",") if os.environ.get("EMAIL_RECIPIENTS") else []
+
+# ============================================================================
+# ALERT MANAGEMENT (Phase 2)
+# ============================================================================
+
+ALERTS_STORAGE_DIR = OUTPUTS_DIR / "alerts"
+ALERT_AUTO_NOTIFY = True           # Auto-send email on new alerts
+ALERT_NOTIFICATION_COOLDOWN = 60   # Seconds between notifications for same session
+=======
 # QUALITY ANALYSIS
 # ============================================================================
 
@@ -189,3 +240,4 @@ ELDERLY_DWELL_TIME_TOLERANCE = 2.0  # Multiplier for acceptable dwell time
 # Vulnerable group handling
 VULNERABLE_CONFIDENCE_REDUCTION = 0.3   # Reduce confidence for vulnerable alerts
 VULNERABLE_REQUIRES_REVIEW = True       # Always require human review
+>>>>>>> MVP
