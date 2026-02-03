@@ -1,5 +1,5 @@
 """
-Digital Witness - Main Pipeline Orchestrator
+Digital Witness - Main Pipeline 
 
 Deep learning analysis pipeline: YOLO → CNN → LSTM
 Detects potential shoplifting by correlating behavioral video analysis
@@ -67,7 +67,7 @@ def run_pipeline(
     print("=" * 60)
     print("  DIGITAL WITNESS")
     print("  Deep Learning Retail Security Analysis")
-    print("  YOLO → CNN → LSTM Pipeline")
+    print("  YOLO -> CNN -> LSTM Pipeline")
     print("=" * 60)
     print()
 
@@ -116,7 +116,7 @@ def run_pipeline(
     try:
         deep_result = pipeline.process_video(
             str(video_path),
-            frame_step=2,  # Process every 2nd frame for speed
+            frame_step=1,  # Process every frame for accurate detection
             progress_callback=lambda p, m: update_progress(0.05 + p * 0.55, m),
             store_frame_analyses=False
         )
@@ -155,52 +155,25 @@ def run_pipeline(
     results["quality_report"] = quality_report
 
     # ==========================================================================
-    # PIPELINE STAGE 6-7: POS Data Loading
-    # Load transaction records to compare against video-detected interactions
+    # PIPELINE STAGE 6-7: POS Data Loading (OPTIONAL for MVP)
+    # For MVP, we skip POS and rely purely on video behavior analysis
     # ==========================================================================
-    update_progress(0.72, "Loading POS transaction data...")
-    try:
-        pos_loader = POSDataLoader(pos_path)
-        transactions = pos_loader.load()
-    except FileNotFoundError:
-        print(f"  ! POS file not found, generating mock data...")
-        generator = MockPOSGenerator()
-        mock_data = generator.generate_scenario(
-            scenario_type="partial",
-            base_timestamp=datetime.now(),
-            video_duration=metadata.duration,
-            detected_items=["ITEM001", "ITEM002", "ITEM003"]
-        )
-        generator.save_to_file(mock_data)
-        transactions = POSDataLoader().load()
-
-    print(f"  - Transactions loaded: {len(transactions)}")
+    update_progress(0.72, "Skipping POS check (MVP mode)...")
+    transactions = []
     results["transactions"] = transactions
 
-    # ==========================================================================
-    # PIPELINE STAGE 8: Video-to-POS Cross-Check
-    # Compare detected product interactions against billing records
-    # Discrepancies (picked up but not billed) are key shoplifting indicators
-    # ==========================================================================
-    update_progress(0.75, "Cross-checking interactions with billing...")
-    cross_checker = CrossChecker()
-
-    # Convert deep interactions to product interactions
-    detected_interactions = []
-    for i, interaction in enumerate(deep_result.interaction_timeline[:10]):
-        if interaction.interaction_type in ["pickup", "hold"]:
-            detected_interactions.append(ProductInteraction(
-                sku=f"ITEM{(i % 3) + 1:03d}",  # Demo SKU mapping
-                timestamp=interaction.timestamp,
-                interaction_type=interaction.interaction_type,
-                confidence=interaction.confidence
-            ))
-
-    discrepancy_report = cross_checker.check_discrepancies(
-        detected_interactions,
-        transactions
+    # Create empty discrepancy report for MVP (no POS cross-check)
+    from .analysis.cross_checker import DiscrepancyReport
+    discrepancy_report = DiscrepancyReport(
+        total_detected=deep_result.total_interactions,
+        total_billed=0,
+        matched_items=[],
+        missing_from_billing=[],
+        extra_in_billing=[],
+        discrepancy_count=0,
+        match_rate=1.0  # No discrepancy when no POS data
     )
-    print(f"  - Discrepancies: {discrepancy_report.discrepancy_count}")
+    print(f"  - MVP Mode: POS cross-check skipped")
     results["discrepancy_report"] = discrepancy_report
 
     # Step 9: Convert deep predictions to behavior events

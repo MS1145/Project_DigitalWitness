@@ -20,7 +20,11 @@ from .quality_analyzer import VideoQualityReport
 from ..config import (
     BIAS_SENSITIVITY,
     BIAS_DETECTION_RATE_MIN,
-    BIAS_CONFIDENCE_VARIANCE_MAX
+    BIAS_CONFIDENCE_VARIANCE_MAX,
+    CHILD_HEIGHT_RATIO_MAX,
+    ELDERLY_MOVEMENT_SPEED_MIN,
+    VULNERABLE_CONFIDENCE_REDUCTION,
+    VULNERABLE_REQUIRES_REVIEW
 )
 
 
@@ -29,6 +33,18 @@ class BiasRiskLevel(Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
+
+@dataclass
+class VulnerableGroupIndicators:
+    """Indicators for vulnerable group detection (XAI feature)."""
+    possible_child: bool = False        # Height ratio suggests child
+    possible_elderly: bool = False      # Movement pattern suggests elderly
+    possible_accidental: bool = False   # Brief, uncertain behavior suggests accident
+    child_confidence: float = 0.0       # Confidence in child detection
+    elderly_confidence: float = 0.0     # Confidence in elderly detection
+    accidental_confidence: float = 0.0  # Confidence in accidental shoplifting
+    explanation: str = ""               # XAI explanation for human review
 
 
 @dataclass
@@ -54,6 +70,9 @@ class BiasMetrics:
     # Overall assessment
     temporal_bias_score: float          # Overall temporal bias indicator
     overall_bias_risk: BiasRiskLevel    # Summary risk level
+
+    # Vulnerable group indicators (XAI feature)
+    vulnerable_indicators: Optional[VulnerableGroupIndicators] = None
 
 
 @dataclass
@@ -140,7 +159,8 @@ class BiasDetector:
         self,
         behavior_events: List[BehaviorEvent],
         quality_report: Optional[VideoQualityReport] = None,
-        video_duration: float = 0.0
+        video_duration: float = 0.0,
+        detection_info: Optional[Dict] = None
     ) -> FairnessReport:
         """
         Analyze for potential bias in predictions.
@@ -149,14 +169,15 @@ class BiasDetector:
             behavior_events: Classified behavior events
             quality_report: Optional video quality report
             video_duration: Total video duration
+            detection_info: Optional dict with person bbox info for vulnerable group detection
 
         Returns:
             FairnessReport with bias assessment
         """
-        # Calculate bias metrics
-        metrics = self._calculate_metrics(behavior_events, quality_report)
+        # Calculate bias metrics including vulnerable group detection
+        metrics = self._calculate_metrics(behavior_events, quality_report, detection_info, video_duration)
 
-        # Detect bias flags
+        # Detect bias flags (including vulnerable group flags)
         flags = self._detect_bias_flags(behavior_events, quality_report, metrics)
 
         # Generate recommendations
@@ -194,9 +215,11 @@ class BiasDetector:
     def _calculate_metrics(
         self,
         behavior_events: List[BehaviorEvent],
-        quality_report: Optional[VideoQualityReport]
+        quality_report: Optional[VideoQualityReport],
+        detection_info: Optional[Dict] = None,
+        video_duration: float = 0.0
     ) -> BiasMetrics:
-        """Calculate quantitative bias metrics."""
+        """Calculate quantitative bias metrics including vulnerable group detection."""
         if not behavior_events:
             return BiasMetrics(
                 confidence_mean=0.0,
@@ -209,7 +232,8 @@ class BiasDetector:
                 suspicious_ratio=0.0,
                 calibration_score=0.0,
                 temporal_bias_score=0.0,
-                overall_bias_risk=BiasRiskLevel.HIGH
+                overall_bias_risk=BiasRiskLevel.HIGH,
+                vulnerable_indicators=None
             )
 
         # Confidence metrics
@@ -263,6 +287,11 @@ class BiasDetector:
             conf_variance, detection_stability, temporal_consistency, calibration
         )
 
+        # Detect vulnerable groups (XAI feature)
+        vulnerable_indicators = self._detect_vulnerable_groups(
+            behavior_events, detection_info, video_duration
+        )
+
         return BiasMetrics(
             confidence_mean=conf_mean,
             confidence_std=conf_std,
@@ -274,8 +303,141 @@ class BiasDetector:
             suspicious_ratio=suspicious_ratio,
             calibration_score=calibration,
             temporal_bias_score=temporal_bias,
-            overall_bias_risk=bias_risk
+            overall_bias_risk=bias_risk,
+            vulnerable_indicators=vulnerable_indicators
         )
+
+    def _detect_vulnerable_groups(
+        self,
+        behavior_events: List[BehaviorEvent],
+        detection_info: Optional[Dict],
+        video_duration: float
+    ) -> VulnerableGroupIndicators:
+        """
+        Detect indicators of vulnerable groups for XAI.
+
+        This helps distinguish between intentional shoplifting and accidental
+        behavior by children, elderly, or confused individuals.
+
+        Args:
+            behavior_events: Classified behavior events
+            detection_info: Optional dict with person detection info (bbox sizes, etc.)
+            video_duration: Total video duration
+
+        Returns:
+            VulnerableGroupIndicators with XAI explanations
+        """
+        indicators = VulnerableGroupIndicators()
+        explanations = []
+
+        if not behavior_events:
+            return indicators
+
+        # Analyze behavior patterns for accidental shoplifting indicators
+        suspicious_events = [
+            e for e in behavior_events
+            if e.behavior_type in {"concealment", "shoplifting", "pickup"}
+        ]
+
+        if suspicious_events:
+            # Check for accidental shoplifting indicators:
+            # 1. Brief duration (< 2 seconds of suspicious behavior)
+            # 2. Low confidence in suspicious predictions
+            # 3. Followed by normal behavior (put back)
+
+            total_suspicious_duration = sum(
+                (e.end_time - e.start_time) for e in suspicious_events
+            )
+
+            avg_suspicious_confidence = np.mean([e.confidence for e in suspicious_events])
+
+            # Brief suspicious behavior with low confidence suggests accident
+            if total_suspicious_duration < 2.0 and avg_suspicious_confidence < 0.7:
+                indicators.possible_accidental = True
+                indicators.accidental_confidence = 0.6
+                explanations.append(
+                    f"Brief suspicious behavior ({total_suspicious_duration:.1f}s) with "
+                    f"low confidence ({avg_suspicious_confidence:.1%}) - may be accidental"
+                )
+
+            # Check for behavior reversal (pickup followed by putback/normal)
+            for i, event in enumerate(suspicious_events):
+                if i + 1 < len(behavior_events):
+                    next_events = [e for e in behavior_events if e.start_time > event.end_time]
+                    if next_events:
+                        next_event = next_events[0]
+                        if next_event.behavior_type == "normal":
+                            indicators.possible_accidental = True
+                            indicators.accidental_confidence = max(
+                                indicators.accidental_confidence, 0.7
+                            )
+                            explanations.append(
+                                "Suspicious behavior followed by return to normal - "
+                                "possible accidental pickup"
+                            )
+
+        # Use detection_info if available for child/elderly detection
+        if detection_info:
+            # Check for child indicators (small bounding boxes)
+            if "person_heights" in detection_info:
+                heights = detection_info["person_heights"]
+                frame_height = detection_info.get("frame_height", 1080)
+
+                for height in heights:
+                    height_ratio = height / frame_height
+                    if height_ratio < CHILD_HEIGHT_RATIO_MAX:
+                        indicators.possible_child = True
+                        indicators.child_confidence = max(
+                            indicators.child_confidence,
+                            1.0 - (height_ratio / CHILD_HEIGHT_RATIO_MAX)
+                        )
+                        explanations.append(
+                            f"Small person detected (height ratio: {height_ratio:.2f}) - "
+                            "may be a child"
+                        )
+
+            # Check for elderly indicators (slow movement between frames)
+            if "movement_speeds" in detection_info:
+                speeds = detection_info["movement_speeds"]
+                slow_movements = [s for s in speeds if s < ELDERLY_MOVEMENT_SPEED_MIN]
+                if len(slow_movements) > len(speeds) * 0.5:
+                    indicators.possible_elderly = True
+                    avg_speed = np.mean(speeds) if speeds else 0
+                    indicators.elderly_confidence = max(
+                        0.5, 1.0 - (avg_speed / ELDERLY_MOVEMENT_SPEED_MIN)
+                    )
+                    explanations.append(
+                        f"Slow movement pattern detected - may be elderly person"
+                    )
+
+        # If no detection_info, use heuristics from behavior patterns
+        else:
+            # Hesitant behavior (many transitions) could indicate confusion
+            if len(behavior_events) > 5:
+                transitions = sum(
+                    1 for i in range(1, len(behavior_events))
+                    if behavior_events[i].behavior_type != behavior_events[i-1].behavior_type
+                )
+                transition_rate = transitions / (len(behavior_events) - 1)
+
+                if transition_rate > 0.6:
+                    # High transition rate suggests confusion/hesitation
+                    indicators.possible_accidental = True
+                    indicators.accidental_confidence = max(
+                        indicators.accidental_confidence, 0.5
+                    )
+                    explanations.append(
+                        f"High behavior transition rate ({transition_rate:.1%}) - "
+                        "suggests confusion or hesitation"
+                    )
+
+        # Generate XAI explanation
+        if explanations:
+            indicators.explanation = " | ".join(explanations)
+        else:
+            indicators.explanation = "No vulnerable group indicators detected"
+
+        return indicators
 
     def _calculate_temporal_consistency(
         self,
@@ -499,6 +661,40 @@ class BiasDetector:
                 confidence_impact=0.9
             ))
 
+        # Vulnerable group flags (XAI features for human review)
+        if metrics.vulnerable_indicators:
+            vi = metrics.vulnerable_indicators
+
+            if vi.possible_child and vi.child_confidence > 0.5:
+                flags.append(BiasFlag(
+                    bias_type="possible_child",
+                    severity="high",
+                    description=f"Possible child detected (confidence: {vi.child_confidence:.1%})",
+                    affected_segments=[],
+                    recommendation="REQUIRES MANUAL REVIEW: Children may not understand store policies",
+                    confidence_impact=VULNERABLE_CONFIDENCE_REDUCTION
+                ))
+
+            if vi.possible_elderly and vi.elderly_confidence > 0.5:
+                flags.append(BiasFlag(
+                    bias_type="possible_elderly",
+                    severity="high",
+                    description=f"Possible elderly person detected (confidence: {vi.elderly_confidence:.1%})",
+                    affected_segments=[],
+                    recommendation="REQUIRES MANUAL REVIEW: May be confusion, not intentional theft",
+                    confidence_impact=VULNERABLE_CONFIDENCE_REDUCTION
+                ))
+
+            if vi.possible_accidental and vi.accidental_confidence > 0.5:
+                flags.append(BiasFlag(
+                    bias_type="possible_accidental",
+                    severity="medium",
+                    description=f"Possible accidental behavior (confidence: {vi.accidental_confidence:.1%})",
+                    affected_segments=[],
+                    recommendation="Review forensic clips to determine if behavior was intentional",
+                    confidence_impact=0.7
+                ))
+
         return flags
 
     def _generate_recommendations(
@@ -542,6 +738,22 @@ class BiasDetector:
         if not flags:
             recommendations.append(
                 "No significant bias indicators detected; standard review process applies"
+            )
+
+        # Vulnerable group specific recommendations
+        if any(f.bias_type == "possible_child" for f in flags):
+            recommendations.append(
+                "CHILD DETECTED: Contact parents/guardians before any action; may not understand policies"
+            )
+
+        if any(f.bias_type == "possible_elderly" for f in flags):
+            recommendations.append(
+                "ELDERLY DETECTED: Consider confusion or memory issues; approach with care and understanding"
+            )
+
+        if any(f.bias_type == "possible_accidental" for f in flags):
+            recommendations.append(
+                "ACCIDENTAL BEHAVIOR: Review clips carefully - may be unintentional; consider gentle reminder approach"
             )
 
         return recommendations

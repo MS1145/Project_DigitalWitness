@@ -4,12 +4,10 @@ Digital Witness - Deep Learning Web Interface
 A Streamlit-based web interface for the YOLO -> CNN -> LSTM behavior detection system.
 Features:
 - Video upload and deep learning analysis
-- POS data editor for mocking transactions
 - Real-time processing progress
 - Analysis results with visualizations
 - Bias and fairness metrics display
 
-Run with: streamlit run app.py
 """
 import streamlit as st
 import tempfile
@@ -241,7 +239,7 @@ def create_pos_data(items_list, payment_method="card"):
     return {"transactions": [transaction]}
 
 
-def analyze_video_deep(video_path, pos_path=None, progress_callback=None):
+def analyze_video_deep(video_path, progress_callback=None):
     """
     Analyze a video using the deep learning pipeline (YOLO -> CNN -> LSTM).
     """
@@ -250,7 +248,6 @@ def analyze_video_deep(video_path, pos_path=None, progress_callback=None):
     # Run the deep learning pipeline
     results = run_pipeline(
         video_path=Path(video_path),
-        pos_path=Path(pos_path) if pos_path else None,
         progress_callback=progress_callback
     )
 
@@ -271,12 +268,20 @@ def render_sidebar():
         st.image("https://img.icons8.com/fluency/96/security-checked.png", width=80)
         st.markdown("### About Digital Witness")
         st.markdown("""
-        An AI-powered security assistant using deep learning:
+        **Digital Witness** is an intelligent retail security assistant that uses deep learning to detect potential shoplifting behavior from surveillance video footage.
 
-        - **YOLO**: Object detection & tracking
-        - **CNN**: Spatial feature extraction
-        - **LSTM**: Temporal behavior classification
-        - **Bias-Aware**: Fairness metrics included
+        **How It Works:**
+        1. **YOLO Detection** - Identifies and tracks people and products in real-time
+        2. **CNN Features** - Extracts visual patterns from each frame using ResNet18
+        3. **LSTM Classification** - Analyzes temporal behavior sequences to detect suspicious patterns
+
+        **Key Features:**
+        - Real-time behavior analysis
+        - Explainable risk scoring
+        - Human-in-the-loop design
+        - Privacy-conscious approach
+
+        **Important:** This is an *advisory system* that assists human operators. It does NOT determine guilt - all alerts require human validation.
         """)
 
         st.markdown("---")
@@ -533,6 +538,11 @@ def render_analysis_results(results):
     import plotly.graph_objects as go
     import plotly.express as px
 
+    # Check if running in demo mode
+    if results.get('demo_mode', False):
+        st.warning("**DEMO MODE**: Analysis ran with simulated data. The actual video analysis failed or no video was provided. Results shown are for demonstration purposes only.")
+        st.markdown("---")
+
     # Main prediction banner
     st.markdown('<div class="section-header">Analysis Results</div>', unsafe_allow_html=True)
 
@@ -543,10 +553,10 @@ def render_analysis_results(results):
     bias_report = results.get('bias_report', {})
 
     score = intent_score.get('score', 0)
-    severity = intent_score.get('severity', 'low')
+    severity = intent_score.get('severity', 'NONE').upper()  # Normalize to uppercase
 
     # Result banner based on severity
-    if severity == 'critical':
+    if severity == 'CRITICAL':
         st.markdown(f"""
         <div class='alert-critical'>
             <h2 style='margin:0; font-size:1.8rem;'>CRITICAL ALERT</h2>
@@ -555,34 +565,34 @@ def render_analysis_results(results):
             </p>
         </div>
         """, unsafe_allow_html=True)
-    elif severity == 'high':
+    elif severity == 'HIGH':
         st.markdown(f"""
         <div class='alert-high'>
             <h2 style='margin:0; font-size:1.8rem;'>HIGH RISK DETECTED</h2>
             <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity.upper()}
+                Intent Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
-    elif severity == 'medium':
+    elif severity == 'MEDIUM':
         st.markdown(f"""
         <div class='alert-medium'>
             <h2 style='margin:0; font-size:1.8rem;'>MEDIUM RISK</h2>
             <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity.upper()}
+                Intent Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
-    elif severity == 'low':
+    elif severity == 'LOW':
         st.markdown(f"""
         <div class='alert-low'>
             <h2 style='margin:0; font-size:1.8rem;'>LOW RISK</h2>
             <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity.upper()}
+                Intent Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
-    else:
+    else:  # NONE or unknown
         st.markdown(f"""
         <div class='alert-none'>
             <h2 style='margin:0; font-size:1.8rem;'>NORMAL BEHAVIOR</h2>
@@ -795,33 +805,6 @@ def render_analysis_results(results):
         else:
             st.info("Bias analysis not available")
 
-    # Discrepancy Report
-    st.markdown("---")
-    st.markdown("### POS Cross-Check Results")
-
-    discrepancy = results.get('discrepancy_report', {})
-    if discrepancy:
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.metric("Items Detected", discrepancy.get('total_detected', 0))
-        with col2:
-            st.metric("Items Billed", discrepancy.get('total_billed', 0))
-        with col3:
-            st.metric("Discrepancies", discrepancy.get('discrepancy_count', 0))
-        with col4:
-            match_rate = discrepancy.get('match_rate', 0)
-            st.metric("Match Rate", f"{match_rate:.1%}")
-
-        missing = discrepancy.get('missing_from_billing', [])
-        if missing:
-            st.warning(f"Items detected but not billed: {len(missing)}")
-            with st.expander("View missing items"):
-                for item in missing:
-                    st.write(f"- {item}")
-    else:
-        st.info("No POS data available for cross-check")
-
     # Video Info
     st.markdown("---")
     st.markdown("### Video Information")
@@ -842,8 +825,8 @@ def render_analysis_results(results):
     st.markdown("### Advisory Summary")
 
     if alert:
-        alert_level = alert.get('level', 'low')
-        if alert_level in ['critical', 'high']:
+        alert_level = alert.get('level', 'NONE').upper()
+        if alert_level in ['CRITICAL', 'HIGH']:
             st.markdown(f"""
             <div class='alert-high'>
                 <h4 style='margin:0;'>Alert Generated: {alert.get('alert_id', 'N/A')}</h4>
@@ -971,8 +954,6 @@ def main():
     # Initialize session state
     if 'analysis_results' not in st.session_state:
         st.session_state.analysis_results = None
-    if 'pos_data' not in st.session_state:
-        st.session_state.pos_data = None
 
     # Render header and sidebar
     render_header()
@@ -1006,40 +987,11 @@ def main():
                 help="Upload a video file to analyze for potential shoplifting behavior"
             )
 
-            # Sample videos
-            st.markdown("**Or select a sample video:**")
-
-            sample_videos = []
-            training_normal = Path("data/training/normal")
-            training_shoplifting = Path("data/training/shoplifting")
-
-            if training_normal.exists():
-                normal_vids = list(training_normal.glob("*.mp4"))[:3]
-                sample_videos.extend([(v, "normal") for v in normal_vids])
-            if training_shoplifting.exists():
-                shoplifting_vids = list(training_shoplifting.glob("*.mp4"))[:3]
-                sample_videos.extend([(v, "shoplifting") for v in shoplifting_vids])
-
-            selected_sample = None
-            if sample_videos:
-                options = ["-- Select a sample --"] + [f"{v.name} ({label})" for v, label in sample_videos]
-                selected_option = st.selectbox("Sample videos", options, label_visibility="collapsed")
-                if selected_option != "-- Select a sample --":
-                    idx = options.index(selected_option) - 1
-                    selected_sample = sample_videos[idx][0]
-
         with col2:
             # Video preview
             if uploaded_file:
                 st.markdown("### Preview")
                 st.video(uploaded_file)
-
-        st.markdown("---")
-
-        # POS Editor
-        pos_data = render_pos_editor()
-        if pos_data:
-            st.session_state.pos_data = pos_data
 
         st.markdown("---")
 
@@ -1050,27 +1002,18 @@ def main():
                 "Analyze Video (YOLO + CNN + LSTM)",
                 type="primary",
                 use_container_width=True,
-                disabled=(uploaded_file is None and selected_sample is None)
+                disabled=(uploaded_file is None)
             )
 
         # Run analysis
         if analyze_clicked:
             video_path = None
-            pos_path = None
 
             if uploaded_file is not None:
                 # Save uploaded file temporarily
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                     tmp_file.write(uploaded_file.read())
                     video_path = tmp_file.name
-            elif selected_sample is not None:
-                video_path = str(selected_sample)
-
-            # Save POS data temporarily if provided
-            if st.session_state.pos_data:
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w') as tmp_pos:
-                    json.dump(st.session_state.pos_data, tmp_pos)
-                    pos_path = tmp_pos.name
 
             if video_path:
                 # Progress tracking
@@ -1087,7 +1030,6 @@ def main():
                     try:
                         results = analyze_video_deep(
                             video_path,
-                            pos_path=pos_path,
                             progress_callback=update_progress
                         )
                     except Exception as e:
@@ -1099,8 +1041,6 @@ def main():
                 # Clean up temp files
                 if uploaded_file is not None and os.path.exists(video_path):
                     os.unlink(video_path)
-                if pos_path and os.path.exists(pos_path):
-                    os.unlink(pos_path)
 
                 # Store results
                 st.session_state.analysis_results = results

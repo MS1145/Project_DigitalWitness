@@ -1,6 +1,5 @@
 """
 Digital Witness - Unified Entry Point
-======================================
 
 This is the main CLI entry point for the Digital Witness retail security system.
 It routes commands to the appropriate subsystems based on command-line arguments.
@@ -20,14 +19,10 @@ Available Commands:
     python run.py --ui         # Launch Streamlit web interface
     python run.py --train      # Train LSTM model on video dataset
     python run.py --evaluate   # Evaluate model with detailed metrics
-    python run.py <video.mp4>  # Analyze specific video file
 
 Key Design Principle:
     This system does NOT determine guilt. It provides intent risk assessments
     with explainable evidence for human operators to review.
-
-Author: Digital Witness Team
-Date: 2026
 """
 import sys
 import subprocess
@@ -46,7 +41,7 @@ def print_banner():
     print("=" * 60)
     print("  DIGITAL WITNESS")
     print("  Deep Learning Retail Security Assistant")
-    print("  YOLO → CNN → LSTM Pipeline")
+    print("  YOLO -> CNN -> LSTM Pipeline")
     print("=" * 60)
     print()
 
@@ -62,7 +57,7 @@ def print_help():
     print("  python run.py <video.mp4>  Analyze specific video")
     print("  python run.py --help       Show this help message")
     print()
-    print("Pipeline: YOLO (detection) → CNN (features) → LSTM (classification)")
+    print("Pipeline: YOLO (detection) -> CNN (features) -> LSTM (classification)")
     print()
 
 

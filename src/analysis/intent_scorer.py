@@ -133,13 +133,31 @@ class IntentScorer:
         bypass_score = self._score_bypass(behavior_events)
         duration_score = self._score_duration(behavior_events, video_duration)
 
-        # Calculate weighted total
-        total_score = (
-            self.weight_discrepancy * discrepancy_score +
-            self.weight_concealment * concealment_score +
-            self.weight_bypass * bypass_score +
-            self.weight_duration * duration_score
-        )
+        # Check if we're in MVP mode (no POS data)
+        # When no POS data, use video-only weights for behavior detection
+        no_pos_data = (discrepancy_report.total_billed == 0 and
+                       discrepancy_report.total_detected > 0)
+
+        if no_pos_data:
+            # MVP Mode: Video-only scoring (no POS cross-check)
+            # Reweight to focus on behavioral signals
+            w_concealment = 0.50  # Primary shoplifting indicator
+            w_bypass = 0.35       # Checkout avoidance
+            w_duration = 0.15     # Time in suspicious state
+            total_score = (
+                w_concealment * concealment_score +
+                w_bypass * bypass_score +
+                w_duration * duration_score
+            )
+        else:
+            # Full Mode: With POS data
+            # Calculate weighted total
+            total_score = (
+                self.weight_discrepancy * discrepancy_score +
+                self.weight_concealment * concealment_score +
+                self.weight_bypass * bypass_score +
+                self.weight_duration * duration_score
+            )
 
         # Clamp to [0, 1]
         total_score = max(0.0, min(1.0, total_score))
@@ -206,10 +224,13 @@ class IntentScorer:
 
     def _score_concealment(self, events: List[BehaviorEvent]) -> float:
         """
-        Score from concealment behaviors (hiding items on person).
+        Score from concealment/shoplifting behaviors (hiding items on person).
 
         Factors in both count and confidence. Maxes out at 3 events
         to avoid over-weighting repeated low-confidence detections.
+
+        Includes both "concealment" and "shoplifting" behavior types since
+        they represent the same suspicious activity pattern.
 
         Formula: avg_confidence * min(count/3, 1.0)
 
@@ -218,12 +239,14 @@ class IntentScorer:
         - 3 high-confidence concealments (0.9) → 0.9 * 1.0 = 0.90
         - 5 low-confidence concealments (0.5) → 0.5 * 1.0 = 0.50 (capped at 3)
         """
-        concealment_events = [e for e in events if e.behavior_type == "concealment"]
+        # Include both "concealment" and "shoplifting" as suspicious behaviors
+        suspicious_types = {"concealment", "shoplifting"}
+        concealment_events = [e for e in events if e.behavior_type in suspicious_types]
 
         if not concealment_events:
             return 0.0
 
-        # Average confidence across all concealment events
+        # Average confidence across all concealment/shoplifting events
         avg_confidence = sum(e.confidence for e in concealment_events) / len(concealment_events)
         # Count factor: saturates at 3 events to prevent gaming via many low-conf detections
         count_factor = min(1.0, len(concealment_events) / 3)
@@ -257,7 +280,7 @@ class IntentScorer:
         """
         Score from time spent in suspicious states.
 
-        Longer durations of concealment/bypass increase risk score.
+        Longer durations of concealment/bypass/shoplifting increase risk score.
         Scale factor of 3 means ~33% suspicious time = max score (1.0).
 
         Why duration matters:
@@ -270,7 +293,7 @@ class IntentScorer:
         - 10 sec suspicious → 10/60 * 3 = 0.50
         - 20 sec suspicious → 20/60 * 3 = 1.00 (capped)
         """
-        suspicious_types = {"concealment", "bypass"}
+        suspicious_types = {"concealment", "bypass", "shoplifting"}
         suspicious_events = [e for e in events if e.behavior_type in suspicious_types]
 
         if not suspicious_events or video_duration <= 0:
@@ -316,12 +339,12 @@ class IntentScorer:
             for sku in discrepancy_report.missing_from_billing:
                 lines.append(f"  * {sku}")
 
-        # Concealment explanation
+        # Concealment/Shoplifting explanation
         concealment_count = sum(
-            1 for e in events if e.behavior_type == "concealment"
+            1 for e in events if e.behavior_type in {"concealment", "shoplifting"}
         )
         if concealment_count > 0:
-            lines.append(f"- {concealment_count} concealment behavior(s) detected")
+            lines.append(f"- {concealment_count} suspicious behavior(s) detected (concealment/shoplifting)")
 
         # Bypass explanation
         bypass_count = sum(

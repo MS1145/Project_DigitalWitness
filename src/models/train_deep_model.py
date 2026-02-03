@@ -143,7 +143,7 @@ def extract_features_from_videos(
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # Extract features from all frames
+        # Extract features from all frames (no skipping for better accuracy)
         frame_features = []
         frame_num = 0
 
@@ -152,13 +152,11 @@ def extract_features_from_videos(
             if not ret:
                 break
 
-            # Process every 2nd frame for speed
-            if frame_num % 2 == 0:
-                features = cnn.extract_features(
-                    frame, frame_num, frame_num / fps
-                )
-                frame_features.append(features.features)
-
+            # Process every frame for accurate feature extraction
+            features = cnn.extract_features(
+                frame, frame_num, frame_num / fps
+            )
+            frame_features.append(features.features)
             frame_num += 1
 
         cap.release()
@@ -247,12 +245,17 @@ def train_lstm_classifier(
 
     cnn.close()
 
-    # Prepare training data
-    # Map to 4-class system: normal=0, shoplifting=1 (or spread across pickup/concealment/bypass)
+    # Prepare training data with 2-class system (matches available dataset)
+    # Classes: normal=0, shoplifting=1
+    # Dataset structure:
+    #   - data/training/normal/      -> class 0 (normal behavior)
+    #   - data/training/shoplifting/ -> class 1 (suspicious/shoplifting behavior)
     all_sequences = normal_sequences + shoplifting_sequences
     all_labels = [0] * len(normal_sequences) + [1] * len(shoplifting_sequences)
 
     print(f"\n  Total sequences: {len(all_sequences)}")
+    print(f"  - Normal sequences (class 0): {len(normal_sequences)}")
+    print(f"  - Shoplifting sequences (class 1): {len(shoplifting_sequences)}")
 
     if len(all_sequences) < 10:
         print("  ERROR: Not enough training data!")
@@ -274,15 +277,16 @@ def train_lstm_classifier(
     print(f"  - Training samples: {len(train_sequences)}")
     print(f"  - Validation samples: {len(val_sequences)}")
 
-    # Train LSTM
+    # Train LSTM with 2-class system (matches dataset)
     print("\n[4/4] Training LSTM classifier...")
 
     # Get input dimension from first sequence
     input_dim = train_sequences[0].shape[1]
 
+    # Binary classification: normal vs shoplifting
     lstm = LSTMIntentClassifier(
         input_dim=input_dim,
-        num_classes=2  # Binary for now: normal vs shoplifting
+        num_classes=2  # 2 classes: normal, shoplifting
     )
     lstm.classes = ["normal", "shoplifting"]
 

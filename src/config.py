@@ -126,9 +126,10 @@ EDGE_CASE_AMBIGUITY_THRESHOLD = 0.2  # Max probability gap for ambiguity
 # ============================================================================
 
 # YOLO Object Detection
-YOLO_MODEL_PATH = MODELS_DIR / "yolov8n.pt"
-YOLO_CONF_THRESHOLD = 0.5            # Minimum detection confidence
-YOLO_IOU_THRESHOLD = 0.5             # IoU threshold for NMS
+# Use YOLOv8s (small) for better accuracy - nano misses detections in multi-person scenes
+YOLO_MODEL_PATH = MODELS_DIR / "yolov8s.pt"
+YOLO_CONF_THRESHOLD = 0.3            # Lower threshold for better recall (was 0.5)
+YOLO_IOU_THRESHOLD = 0.45            # Slightly lower for crowded scenes (was 0.5)
 YOLO_CLASSES = ["person", "bottle", "cup", "food", "bag"]  # Retail-relevant
 
 # CNN Feature Extraction

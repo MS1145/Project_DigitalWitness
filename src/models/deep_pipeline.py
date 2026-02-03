@@ -1,22 +1,17 @@
 """
-Deep learning pipeline orchestration for Digital Witness.
+Deep learning pipeline for Digital Witness.
 
 Coordinates the YOLO -> CNN -> LSTM flow for end-to-end
 video analysis using deep learning models.
 
-Architecture Overview:
-----------------------
+Architecture Overview 
 1. YOLO (Object Detection) - Detects persons and products in each frame
 2. Tracker (ByteTrack) - Maintains object identity across frames
 3. CNN (ResNet18) - Extracts 512-dim spatial features per frame
 4. LSTM (Bidirectional + Attention) - Classifies temporal behavior sequences
 
-Data Flow:
-----------
-Video Frame → YOLO Detection → Object Tracking → CNN Features → LSTM Classification
-                    ↓                 ↓                              ↓
-              Person/Product    Track IDs           Intent: normal/pickup/concealment/bypass
-              Bounding Boxes    Maintained
+Data Flow - Video Frame → YOLO Detection → Object Tracking → CNN Features → LSTM Classification
+
 """
 import numpy as np
 from dataclasses import dataclass, field
@@ -96,7 +91,6 @@ class DeepPipeline:
     """
     End-to-end deep learning pipeline: YOLO -> CNN -> LSTM.
 
-    Orchestrates:
     1. YOLO detection of persons and products
     2. Multi-object tracking
     3. Interaction detection
@@ -141,7 +135,18 @@ class DeepPipeline:
 
         self.detector.initialize()
         self.cnn.initialize()
-        self.lstm.initialize()
+
+        # Load trained LSTM model if available
+        from ..config import MODELS_DIR
+        lstm_model_path = MODELS_DIR / "lstm_classifier.pt"
+
+        if lstm_model_path.exists():
+            print(f"  Loading trained LSTM model from: {lstm_model_path}")
+            self.lstm.load_model(lstm_model_path)
+        else:
+            print("  Warning: No trained LSTM model found, using untrained model")
+            self.lstm.initialize()
+
         self._initialized = True
 
     def process_video(
@@ -317,6 +322,28 @@ class DeepPipeline:
         feature_array = np.array(features)  # Shape: (num_frames, feature_dim)
         num_frames = len(features)
 
+        # Handle short videos that have fewer frames than sequence_length
+        if num_frames < self.sequence_length:
+            # Pad the sequence to minimum required length
+            padding_needed = self.sequence_length - num_frames
+            padding = np.zeros((padding_needed, feature_array.shape[1]))
+            padded_features = np.vstack([feature_array, padding])
+
+            # Process the padded sequence as a single window
+            start_time = 0.0
+            end_time = num_frames / fps if fps > 0 else 0.0
+
+            prediction = self.lstm.predict_sequence(
+                padded_features,
+                sequence_id=f"seq_0_{num_frames}_padded",
+                start_time=start_time,
+                end_time=end_time
+            )
+            # Reduce confidence for padded sequences
+            prediction.confidence *= (num_frames / self.sequence_length)
+            predictions.append(prediction)
+            return predictions
+
         # Create sliding windows with overlap for temporal continuity
         # This ensures behaviors spanning window edges are captured
         for start in range(0, num_frames - self.sequence_length + 1, self.stride):
@@ -348,7 +375,7 @@ class DeepPipeline:
         Strategy:
         ---------
         1. Count occurrences of each intent class across all windows
-        2. Apply 2x weight to suspicious classes (concealment, bypass, shoplifting)
+        2. Apply 2x weight to suspicious classes (concealment, bypass, shoplifting, pickup)
            to ensure even brief suspicious activity is not drowned out by normal behavior
         3. If suspicious activity exceeds 30% weighted presence, report the
            most confident suspicious prediction
@@ -356,6 +383,8 @@ class DeepPipeline:
 
         This weighted approach addresses the "needle in haystack" problem where
         a few seconds of shoplifting would be outvoted by minutes of normal behavior.
+
+        Note: Works with both 2-class (normal/shoplifting) and 4-class models.
         """
         if not predictions:
             return "normal", 0.0
@@ -373,11 +402,13 @@ class DeepPipeline:
 
         # Apply 2x weight to suspicious classes to prevent normal behavior
         # from drowning out brief but critical suspicious activity
+        # Include both 2-class (shoplifting) and 4-class suspicious types
         suspicious_weight = 2.0
+        suspicious_classes = ["concealment", "bypass", "shoplifting", "pickup"]
         weighted_counts = {}
 
         for cls, count in class_counts.items():
-            if cls in ["concealment", "bypass", "shoplifting"]:
+            if cls in suspicious_classes:
                 weighted_counts[cls] = count * suspicious_weight
             else:
                 weighted_counts[cls] = count
@@ -394,7 +425,6 @@ class DeepPipeline:
 
         # Determine overall intent with suspicious activity priority
         # 30% threshold: if suspicious activity makes up significant portion
-        suspicious_classes = ["concealment", "bypass", "shoplifting"]
         suspicious_score = sum(
             class_scores.get(cls, 0) for cls in suspicious_classes
         )

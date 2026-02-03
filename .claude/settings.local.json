@@ -1,18 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -Command \"Remove-Item -Path ''models\\\\behavior_classifier.pkl'' -Force -ErrorAction SilentlyContinue; Remove-Item -Path ''models\\\\behavior_classifier_info.json'' -Force -ErrorAction SilentlyContinue; Remove-Item -Path ''models\\\\*.png'' -Force -ErrorAction SilentlyContinue; Write-Host ''Cleaned old model files''\")",
-      "Bash(powershell -Command \"Remove-Item -Path ''notebooks\\\\train_behavior_classifier_executed.ipynb'' -Force -ErrorAction SilentlyContinue; Write-Host ''Cleaned executed notebook''\")",
-      "Bash(.venvScriptspython.exe train.py)",
-      "Bash(powershell -Command \".\\\\.venv\\\\Scripts\\\\python.exe train.py\")",
-      "Bash(powershell -Command \".\\\\.venv\\\\Scripts\\\\pip.exe install streamlit plotly\")",
-      "Bash(powershell -Command \"if \\(Test-Path ''nul''\\) { Remove-Item ''nul'' -Force; Write-Host ''Deleted nul file'' } else { Write-Host ''nul file not found'' }\")",
-      "Bash(powershell -Command \"Get-ChildItem -Force | Select-Object Name, Mode\")",
-      "Bash(dir:*)",
-      "Bash(python -m py_compile:*)",
-      "Bash(ls:*)",
-      "Bash(pip install:*)",
-      "Bash(del \"C:\\\\Users\\\\MSI\\\\Music\\\\Project_DigitalWitness\\\\src\\\\pose\\\\train_classifier.py\")"
+      "Bash(.venv/Scripts/python.exe -m py_compile:*)",
+      "Bash(.venv/Scripts/python.exe:*)"
     ]
   }
 }

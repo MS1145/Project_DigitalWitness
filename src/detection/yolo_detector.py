@@ -532,7 +532,14 @@ class YOLODetector:
     def reset_tracking(self):
         """Reset tracking state for new video."""
         if self.model is not None:
+            # Clear predictor to reset ByteTrack state
             self.model.predictor = None
+            # Also reset tracker state if it exists
+            if hasattr(self.model, 'trackers'):
+                self.model.trackers = {}
+            # Force re-initialization on next track call
+            if hasattr(self.model, 'tracker'):
+                self.model.tracker = None
 
     def close(self):
         """Release resources."""
