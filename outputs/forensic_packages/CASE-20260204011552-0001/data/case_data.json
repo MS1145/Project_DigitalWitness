@@ -1,0 +1,445 @@
+{
+  "case_id": "CASE-20260204011552-0001",
+  "created_at": "2026-02-04T01:15:52.157348",
+  "video_metadata": {
+    "path": "C:\\Users\\MSI\\AppData\\Local\\Temp\\tmp5j91kham.mp4",
+    "fps": 30.0,
+    "frame_count": 447,
+    "duration": 14.9,
+    "width": 320,
+    "height": 240,
+    "codec": "h264"
+  },
+  "behavior_timeline": [
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 0.0,
+      "end_time": 1.0,
+      "start_frame": 0,
+      "end_frame": 30,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 6.332983559786953e-08,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 0.5,
+      "end_time": 1.5,
+      "start_frame": 15,
+      "end_frame": 45,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 6.244058425863841e-08,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 1.0,
+      "end_time": 2.0,
+      "start_frame": 30,
+      "end_frame": 60,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 4.8566491273049905e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 1.5,
+      "end_time": 2.5,
+      "start_frame": 45,
+      "end_frame": 75,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 5.210930709154127e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 2.0,
+      "end_time": 3.0,
+      "start_frame": 60,
+      "end_frame": 90,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 1.024900342372348e-07,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 2.5,
+      "end_time": 3.5,
+      "start_frame": 75,
+      "end_frame": 105,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 1.6658033530347893e-07,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 3.0,
+      "end_time": 4.0,
+      "start_frame": 90,
+      "end_frame": 120,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 1.4982731499912916e-07,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 3.5,
+      "end_time": 4.5,
+      "start_frame": 105,
+      "end_frame": 135,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 1.1332836891142506e-07,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 4.0,
+      "end_time": 5.0,
+      "start_frame": 120,
+      "end_frame": 150,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 5.856293228134746e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 4.5,
+      "end_time": 5.5,
+      "start_frame": 135,
+      "end_frame": 165,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 2.274993882167564e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 5.0,
+      "end_time": 6.0,
+      "start_frame": 150,
+      "end_frame": 180,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 1.3936259257718575e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 5.5,
+      "end_time": 6.5,
+      "start_frame": 165,
+      "end_frame": 195,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 1.5123916341508448e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 6.0,
+      "end_time": 7.0,
+      "start_frame": 180,
+      "end_frame": 210,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 2.5790418689553007e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 6.5,
+      "end_time": 7.5,
+      "start_frame": 195,
+      "end_frame": 225,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 4.035621969933345e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 7.0,
+      "end_time": 8.0,
+      "start_frame": 210,
+      "end_frame": 240,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 3.7891787485477835e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 7.5,
+      "end_time": 8.5,
+      "start_frame": 225,
+      "end_frame": 255,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 3.209791898939329e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 8.0,
+      "end_time": 9.0,
+      "start_frame": 240,
+      "end_frame": 270,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 3.0507941062296595e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 8.5,
+      "end_time": 9.5,
+      "start_frame": 255,
+      "end_frame": 285,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 2.8824681308492472e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 9.0,
+      "end_time": 10.0,
+      "start_frame": 270,
+      "end_frame": 300,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 2.8648246441775882e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 9.5,
+      "end_time": 10.5,
+      "start_frame": 285,
+      "end_frame": 315,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 4.056458280388142e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 10.0,
+      "end_time": 11.0,
+      "start_frame": 300,
+      "end_frame": 330,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 5.706965922058771e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 10.5,
+      "end_time": 11.5,
+      "start_frame": 315,
+      "end_frame": 345,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 5.854059637044884e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 11.0,
+      "end_time": 12.0,
+      "start_frame": 330,
+      "end_frame": 360,
+      "confidence": 1.0,
+      "probabilities": {
+        "normal": 5.271571268394837e-08,
+        "shoplifting": 1.0
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 11.5,
+      "end_time": 12.5,
+      "start_frame": 345,
+      "end_frame": 375,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 6.546088826553387e-08,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 12.0,
+      "end_time": 13.0,
+      "start_frame": 360,
+      "end_frame": 390,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 7.927025080789463e-08,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 12.5,
+      "end_time": 13.5,
+      "start_frame": 375,
+      "end_frame": 405,
+      "confidence": 0.9999998807907104,
+      "probabilities": {
+        "normal": 7.411369296050907e-08,
+        "shoplifting": 0.9999998807907104
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 13.0,
+      "end_time": 14.0,
+      "start_frame": 390,
+      "end_frame": 420,
+      "confidence": 0.9999997615814209,
+      "probabilities": {
+        "normal": 2.3973109364305856e-07,
+        "shoplifting": 0.9999997615814209
+      }
+    },
+    {
+      "behavior_type": "shoplifting",
+      "start_time": 13.5,
+      "end_time": 14.5,
+      "start_frame": 405,
+      "end_frame": 435,
+      "confidence": 0.9999996423721313,
+      "probabilities": {
+        "normal": 3.0988081789473654e-07,
+        "shoplifting": 0.9999996423721313
+      }
+    }
+  ],
+  "discrepancy_report": {
+    "missing_from_billing": [],
+    "extra_in_billing": [],
+    "matched_items": [],
+    "total_detected": 0,
+    "total_billed": 0,
+    "discrepancy_count": 0,
+    "match_rate": 1.0
+  },
+  "intent_score": {
+    "score": 0.39999998211860666,
+    "severity": "LOW",
+    "components": {
+      "discrepancy": {
+        "score": 0.0,
+        "weight": 0.4000000000000001,
+        "contribution": 0.0
+      },
+      "concealment": {
+        "score": 0.9999999403953552,
+        "weight": 0.30000000000000004,
+        "contribution": 0.2999999821186066
+      },
+      "bypass": {
+        "score": 0.0,
+        "weight": 0.20000000000000004,
+        "contribution": 0.0
+      },
+      "duration": {
+        "score": 1.0,
+        "weight": 0.10000000000000002,
+        "contribution": 0.10000000000000002
+      }
+    },
+    "explanation": "==================================================\nBIAS-AWARE INTENT ASSESSMENT\n==================================================\n\nFinal Score: 0.40 (LOW)\nAnalysis Confidence: HIGH\n\n--- SCORING BREAKDOWN ---\n\nRaw Intent Score: 0.40\n  - discrepancy: 0.00 (weight: 40.0%)\n  - concealment: 1.00 (weight: 30.0%)\n  - bypass: 0.00 (weight: 20.0%)\n  - duration: 1.00 (weight: 10.0%)\n\n--- FAIRNESS ASSESSMENT ---\n\nFairness Score: 93.5%\nBias Risk Level: LOW\n\nBias Indicators:\n  [MEDIUM] Unusually high rate of suspicious predictions (100.0%)\n  [LOW] Confidence scores skewed toward low values\n\n--- RECOMMENDATIONS ---\n\n  - All alerts require human validation before any action is taken\n  - Manually review suspicious segments to verify accuracy\n\n--- IMPORTANT ---\n\nThis is an advisory assessment with bias awareness.\nFinal decisions MUST be made by human operators.\n\n=================================================="
+  },
+  "alert": null,
+  "forensic_clips": [],
+  "summary": "CASE SUMMARY\n========================================\n\nVideo: tmp5j91kham.mp4\nDuration: 14.9 seconds\n\n--- ANALYSIS RESULTS ---\n\nTotal behaviors detected: 28\n  - shoplifting: 28\n\nItems detected: 0\nItems billed: 0\nDiscrepancies: 0\nMatch rate: 100.0%\n\nIntent Score: 0.40\nSeverity: LOW\n\nNo alert generated.\n\n========================================\nEND OF SUMMARY",
+  "notes": "\nDeep Learning Analysis Results:\n- Pipeline: YOLO -> CNN -> LSTM\n- Persons tracked: 14\n- Products tracked: 0\n- Interactions: 0\n- Suspicious segments: 28\n\nQuality Analysis:\n- Detection rate: 94.0%\n- Quality score: 0.97\n\nFairness Assessment:\n- Fairness score: 93.5%\n- Bias risk: LOW\n- Analysis reliable: True\n",
+  "fairness_report": {
+    "bias_metrics": {
+      "confidence_mean": 0.9999999403953552,
+      "confidence_std": 8.725226577656268e-08,
+      "confidence_variance": 7.61295788314393e-15,
+      "detection_rate_stability": 0.9395973154362416,
+      "temporal_consistency": 1.0,
+      "class_balance_ratio": 1.0,
+      "calibration_score": 0.9000003034418278,
+      "temporal_bias_score": 0.0,
+      "overall_bias_risk": "LOW"
+    },
+    "bias_flags": [
+      {
+        "type": "high_suspicious_rate",
+        "severity": "medium",
+        "description": "Unusually high rate of suspicious predictions (100.0%)",
+        "affected_segments": [],
+        "recommendation": "Verify that model is not biased toward false positives"
+      },
+      {
+        "type": "confidence_skew",
+        "severity": "low",
+        "description": "Confidence scores skewed toward low values",
+        "affected_segments": [],
+        "recommendation": "Model may be overconfident or underconfident"
+      }
+    ],
+    "recommendations": [
+      "All alerts require human validation before any action is taken",
+      "Manually review suspicious segments to verify accuracy"
+    ],
+    "flagged_issues": [
+      "Unusually high rate of suspicious predictions (100.0%)"
+    ],
+    "overall_fairness_score": 0.9350000455162741,
+    "analysis_reliable": true,
+    "requires_manual_review": "False"
+  },
+  "quality_report": {
+    "total_frames": 447,
+    "frames_with_detection": 420,
+    "pose_detection_rate": 0.9395973154362416,
+    "average_pose_confidence": 1.0,
+    "average_occlusion_score": 0.2,
+    "occlusion_segments": [],
+    "low_quality_segments": [],
+    "low_confidence_segments": [],
+    "quality_flags": [
+      "QUALITY_OK: Video meets minimum quality requirements"
+    ],
+    "overall_quality_score": 0.9697986577181208,
+    "usable_for_analysis": true
+  }
+}

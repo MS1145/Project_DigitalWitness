@@ -552,52 +552,96 @@ def render_analysis_results(results):
     quality = results.get('quality_analysis', {})
     bias_report = results.get('bias_report', {})
 
-    score = intent_score.get('score', 0)
-    severity = intent_score.get('severity', 'NONE').upper()  # Normalize to uppercase
+    # Get LSTM direct detection (primary signal)
+    lstm_detection = results.get('lstm_detection', {})
+    lstm_class = lstm_detection.get('classification', 'unknown')
+    lstm_confidence = lstm_detection.get('confidence', 0)
+    is_shoplifting = lstm_detection.get('is_shoplifting', False)
 
-    # Result banner based on severity
+    score = intent_score.get('score', 0)
+    severity = intent_score.get('severity', 'NONE').upper()
+
+    # LSTM Detection Banner (PRIMARY RESULT)
+    st.markdown("### LSTM Deep Learning Detection")
+
+    if is_shoplifting and lstm_confidence > 0.7:
+        st.markdown(f"""
+        <div class='alert-critical'>
+            <h2 style='margin:0; font-size:1.8rem;'>SHOPLIFTING BEHAVIOR DETECTED</h2>
+            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
+                LSTM Classification: <strong>{lstm_class.upper()}</strong> | Confidence: <strong>{lstm_confidence:.1%}</strong>
+            </p>
+            <p style='margin:0.5rem 0 0 0; font-size:0.9rem; font-style:italic;'>
+                The deep learning model has identified shoplifting behavior patterns in this video.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    elif is_shoplifting:
+        st.markdown(f"""
+        <div class='alert-high'>
+            <h2 style='margin:0; font-size:1.8rem;'>POTENTIAL SHOPLIFTING DETECTED</h2>
+            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
+                LSTM Classification: <strong>{lstm_class.upper()}</strong> | Confidence: <strong>{lstm_confidence:.1%}</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class='alert-none'>
+            <h2 style='margin:0; font-size:1.8rem;'>NORMAL BEHAVIOR</h2>
+            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
+                LSTM Classification: <strong>{lstm_class.upper()}</strong> | Confidence: <strong>{lstm_confidence:.1%}</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Risk Score Section
+    st.markdown("### Bias-Adjusted Risk Assessment")
+
     if severity == 'CRITICAL':
         st.markdown(f"""
         <div class='alert-critical'>
-            <h2 style='margin:0; font-size:1.8rem;'>CRITICAL ALERT</h2>
-            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity.upper()}
+            <h3 style='margin:0;'>Risk Level: CRITICAL</h3>
+            <p style='margin:0.5rem 0 0 0;'>
+                Adjusted Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
     elif severity == 'HIGH':
         st.markdown(f"""
         <div class='alert-high'>
-            <h2 style='margin:0; font-size:1.8rem;'>HIGH RISK DETECTED</h2>
-            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity}
+            <h3 style='margin:0;'>Risk Level: HIGH</h3>
+            <p style='margin:0.5rem 0 0 0;'>
+                Adjusted Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
     elif severity == 'MEDIUM':
         st.markdown(f"""
         <div class='alert-medium'>
-            <h2 style='margin:0; font-size:1.8rem;'>MEDIUM RISK</h2>
-            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity}
+            <h3 style='margin:0;'>Risk Level: MEDIUM</h3>
+            <p style='margin:0.5rem 0 0 0;'>
+                Adjusted Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
     elif severity == 'LOW':
         st.markdown(f"""
         <div class='alert-low'>
-            <h2 style='margin:0; font-size:1.8rem;'>LOW RISK</h2>
-            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | Severity: {severity}
+            <h3 style='margin:0;'>Risk Level: LOW</h3>
+            <p style='margin:0.5rem 0 0 0;'>
+                Adjusted Score: {score:.2f} | Severity: {severity}
             </p>
         </div>
         """, unsafe_allow_html=True)
-    else:  # NONE or unknown
+    else:
         st.markdown(f"""
         <div class='alert-none'>
-            <h2 style='margin:0; font-size:1.8rem;'>NORMAL BEHAVIOR</h2>
-            <p style='margin:0.5rem 0 0 0; font-size:1.1rem;'>
-                Intent Score: {score:.2f} | No concerns detected
+            <h3 style='margin:0;'>Risk Level: NONE</h3>
+            <p style='margin:0.5rem 0 0 0;'>
+                Adjusted Score: {score:.2f} | No significant risk detected
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -618,6 +662,76 @@ def render_analysis_results(results):
         st.metric("Interactions Found", detections.get('interactions', 0))
     with col4:
         st.metric("Frames Processed", detections.get('frames_processed', 0))
+
+    st.markdown("---")
+
+    # XAI Explanation Section
+    st.markdown("### Explainable AI (XAI) Analysis")
+
+    lstm_detection = results.get('lstm_detection', {})
+    is_shoplifting = lstm_detection.get('is_shoplifting', False)
+    lstm_confidence = lstm_detection.get('confidence', 0)
+    lstm_class = lstm_detection.get('classification', 'unknown')
+
+    with st.expander("Why did the model make this decision?", expanded=True):
+        st.markdown("#### Detection Pipeline Explanation")
+
+        st.markdown(f"""
+        **Step 1: Object Detection (YOLO)**
+        - The YOLO model scanned {detections.get('frames_processed', 0)} video frames
+        - Detected {detections.get('persons_tracked', 0)} person(s) and {detections.get('products_detected', 0)} product(s)
+        - Found {detections.get('interactions', 0)} person-product interactions
+
+        **Step 2: Feature Extraction (CNN - ResNet18)**
+        - Extracted 512-dimensional spatial features from each frame
+        - These features capture visual patterns like body posture, hand movements, and object positions
+
+        **Step 3: Behavior Classification (LSTM)**
+        - Analyzed temporal sequences of {30} frames each
+        - **Classification: {lstm_class.upper()}**
+        - **Confidence: {lstm_confidence:.1%}**
+        """)
+
+        if is_shoplifting:
+            st.markdown("""
+            **Why Shoplifting Was Detected:**
+            The LSTM model identified behavior patterns consistent with shoplifting based on:
+            - Temporal sequence of movements (how actions unfold over time)
+            - Interaction patterns with products
+            - Comparison with training data of known shoplifting behaviors
+            """)
+
+            st.warning("""
+            **Important:** This is a statistical pattern match, not definitive proof.
+            The model learned from training videos and found similar patterns here.
+            Human review is essential to validate this detection.
+            """)
+        else:
+            st.markdown("""
+            **Why Normal Behavior Was Detected:**
+            The LSTM model classified the behavior as normal because:
+            - Movement patterns are consistent with typical shopping behavior
+            - No suspicious interaction sequences were identified
+            - Behavior matches training data of normal shopping
+            """)
+
+        # Show behavior event breakdown
+        behavior_events = results.get('behavior_events', [])
+        if behavior_events:
+            st.markdown("#### Behavior Event Breakdown")
+
+            behavior_counts = {}
+            for event in behavior_events:
+                b_type = event.get('behavior_type', 'unknown')
+                if b_type not in behavior_counts:
+                    behavior_counts[b_type] = {'count': 0, 'total_confidence': 0}
+                behavior_counts[b_type]['count'] += 1
+                behavior_counts[b_type]['total_confidence'] += event.get('confidence', 0)
+
+            for b_type, data in behavior_counts.items():
+                avg_conf = data['total_confidence'] / data['count'] if data['count'] > 0 else 0
+                icon = "🔴" if b_type in ['shoplifting', 'concealment'] else "🟡" if b_type == 'bypass' else "🟢"
+                st.markdown(f"{icon} **{b_type.capitalize()}**: {data['count']} segment(s), avg confidence: {avg_conf:.1%}")
 
     st.markdown("---")
 
@@ -820,9 +934,14 @@ def render_analysis_results(results):
     with col4:
         st.write(f"**FPS:** {video_metadata.get('fps', 0)}")
 
-    # Alert Summary
+    # Advisory Summary - Must be consistent with LSTM detection
     st.markdown("---")
     st.markdown("### Advisory Summary")
+
+    # Get LSTM detection for consistency
+    lstm_detection = results.get('lstm_detection', {})
+    is_shoplifting = lstm_detection.get('is_shoplifting', False)
+    lstm_confidence = lstm_detection.get('confidence', 0)
 
     if alert:
         alert_level = alert.get('level', 'NONE').upper()
@@ -850,10 +969,27 @@ def render_analysis_results(results):
                 </p>
             </div>
             """, unsafe_allow_html=True)
+    elif is_shoplifting and lstm_confidence > 0.5:
+        # LSTM detected shoplifting but no formal alert (due to bias adjustment)
+        st.markdown(f"""
+        <div class='alert-medium'>
+            <h4 style='margin:0;'>Review Recommended</h4>
+            <p style='margin:0.5rem 0;'>
+                <strong>Status:</strong> The LSTM model detected <strong>shoplifting behavior</strong> with {lstm_confidence:.1%} confidence.
+                The risk score was adjusted due to potential bias indicators.
+            </p>
+            <p style='margin:0.5rem 0;'>
+                <strong>Recommendation:</strong> Human review is advised to validate the detection.
+            </p>
+            <p style='margin:0; font-style:italic;'>
+                This is an advisory system. Final determination requires human validation.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class='alert-none'>
-            <h4 style='margin:0;'>No Alert Generated</h4>
+            <h4 style='margin:0;'>No Concerns Detected</h4>
             <p style='margin:0.5rem 0;'>
                 <strong>Status:</strong> Normal shopping behavior detected. No immediate concerns identified.
             </p>

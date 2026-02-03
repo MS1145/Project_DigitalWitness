@@ -1,0 +1,16 @@
+{
+  "package_version": "1.0",
+  "case_id": "CASE-20260204010306-0001",
+  "created_at": "2026-02-04T01:03:07.592376",
+  "created_by": "Digital Witness Forensic System",
+  "contents": {
+    "report": "CASE-20260204010306-0001_report.txt",
+    "clips": [],
+    "screenshots": [],
+    "data_files": [
+      "case_data.json",
+      "timeline.json"
+    ]
+  },
+  "legal_notice": "This forensic package is for advisory purposes only. All findings require human verification. This system does NOT determine guilt."
+}

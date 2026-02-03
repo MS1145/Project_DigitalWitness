@@ -1,0 +1,32 @@
+============================================================
+DIGITAL WITNESS - FORENSIC ANALYSIS REPORT
+============================================================
+
+Case ID: CASE-20260204024415-0001
+Generated: 2026-02-04T02:44:16.206888
+
+IMPORTANT: This report is for advisory purposes only.
+All findings require human verification.
+
+------------------------------------------------------------
+SUMMARY
+------------------------------------------------------------
+This analysis examined video footage and point-of-sale data to assess potential shoplifting behavior. The system generated a MEDIUM severity alert with an intent score of 0.65. All findings require human verification before any action is taken.
+
+------------------------------------------------------------
+INTENT SCORE
+------------------------------------------------------------
+Score: 0.65
+Severity: MEDIUM
+
+------------------------------------------------------------
+DISCREPANCY REPORT
+------------------------------------------------------------
+Items Detected: 3904
+Items Billed: 0
+Discrepancies: 0
+Match Rate: 100.0%
+
+============================================================
+END OF REPORT
+============================================================

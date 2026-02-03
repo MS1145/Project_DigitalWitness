@@ -1,26 +1,26 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Digital Witness is a **deep learning** retail security assistant that detects potential shoplifting by correlating behavioral video analysis with POS transaction data. It uses a **YOLO → CNN → LSTM** pipeline for end-to-end behavior analysis.
+Digital Witness is a deep learning retail security assistant that detects potential shoplifting by analyzing behavioral patterns in video. It uses a **YOLO -> CNN -> LSTM** pipeline.
 
 **Key principle:** The system does NOT determine guilt. It provides intent risk assessments with explainable evidence for human operators to review.
 
 ## Deep Learning Pipeline
 
 ```
-Video → YOLO → CNN → LSTM → Intent Score → Alert
-         ↓       ↓      ↓
-     Detection  Features  Classification
+Video -> YOLO -> CNN -> LSTM -> Intent Score -> Alert
+          |       |      |
+      Detection  Features  Classification
 ```
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **YOLO** | YOLOv8 | Object detection & tracking (persons, products) |
-| **CNN** | ResNet18 | Spatial feature extraction from frames |
-| **LSTM** | Bidirectional LSTM + Attention | Temporal behavior classification |
+| **YOLO** | YOLOv8n | Object detection (persons, products) |
+| **CNN** | ResNet18 | Spatial feature extraction (512-dim) |
+| **LSTM** | Bidirectional + Attention | Temporal behavior classification |
 
 ## Commands
 
@@ -31,168 +31,88 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### Unified Entry Point (`run.py`)
-
+### Run Application
 ```bash
-python run.py              # Run demo mode (simulated data)
-python run.py --ui         # Launch web interface
-python run.py --train      # Train LSTM model on video dataset
-python run.py <video.mp4>  # Analyze specific video
-python run.py --help       # Show help
+python run.py              # Launch web interface (default)
+python run.py --train      # Train LSTM model
+python run.py --evaluate   # Evaluate model metrics
 ```
 
-### Train Model
-```bash
-python run.py --train
-```
-
-Training process:
-- Processes videos from `data/training/normal/` and `data/training/shoplifting/`
-- Extracts CNN features (ResNet18) from video frames
-- Trains bidirectional LSTM classifier with attention
-- Saves model to `models/lstm_classifier.pt`
-
-## Architecture
-
-### 14-Step Analysis Pipeline (`src/main.py`)
-
-1. **Initialize Models** - Load YOLO, CNN, LSTM
-2. **YOLO Detection** - Detect persons and products in frames
-3. **Object Tracking** - Track objects across frames (ByteTrack)
-4. **Interaction Detection** - Detect person-product interactions
-5. **CNN Features** - Extract spatial features per frame
-6. **LSTM Classification** - Classify behavior sequences
-7. **Quality Analysis** - Assess video quality for reliability
-8. **Load POS Data** - Parse JSON transactions
-9. **Cross-Check** - Compare detected products vs billed items
-10. **Bias-Aware Scoring** - Calculate fairness-adjusted intent score
-11. **Edge Case Handling** - Handle occlusion, low confidence, etc.
-12. **Generate Alert** - Create advisory alert if threshold exceeded
-13. **Build Case File** - JSON audit trail with all evidence
-14. **Forensic Package** - PDF report, annotated clips, screenshots
-
-### Module Structure
+## Project Structure
 
 ```
-src/
-├── config.py              # All configuration constants
-├── main.py                # Pipeline orchestration
-│
-├── ui/                    # Streamlit Web Interface
-│   └── app.py             # Web dashboard (run via: python run.py --ui)
-│
-├── detection/             # YOLO Object Detection
-│   ├── yolo_detector.py   # YOLOv8 person/product detection
-│   └── tracker.py         # Multi-object tracking
-│
-├── models/                # Deep Learning Models
-│   ├── cnn_feature_extractor.py  # ResNet18 spatial features
-│   ├── lstm_classifier.py        # Bidirectional LSTM + attention
-│   ├── deep_pipeline.py          # YOLO → CNN → LSTM orchestration
-│   └── train_deep_model.py       # Training script
-│
-├── video/                 # Video Processing
-│   ├── loader.py          # VideoLoader context manager
-│   ├── clip_extractor.py  # Forensic clip extraction
-│   └── annotated_clip_generator.py  # Clips with overlays
-│
-├── pose/                  # Pose Estimation (for quality analysis)
-│   ├── estimator.py       # MediaPipe pose detection
-│   └── behavior_classifier.py  # BehaviorEvent dataclass
-│
-├── pos/                   # POS Transaction Handling
-│   ├── data_loader.py     # JSON parser
-│   └── mock_generator.py  # Test data generation
-│
-├── analysis/              # Analysis & Scoring
-│   ├── cross_checker.py   # Video-to-POS reconciliation
-│   ├── intent_scorer.py   # Multi-factor risk scoring
-│   ├── bias_aware_scorer.py  # Bias-adjusted scoring
-│   ├── bias_detector.py   # Fairness metrics
-│   ├── edge_case_handler.py  # Edge case handling
-│   ├── quality_analyzer.py   # Video quality analysis
-│   └── alert_generator.py    # Advisory alert creation
-│
-└── output/                # Output Generation
-    ├── case_builder.py    # Case file serialization
-    ├── report_generator.py   # PDF forensic reports
-    └── evidence_compiler.py  # Forensic package assembly
+Project_DigitalWitness/
+├── run.py                 # Entry point
+├── src/
+│   ├── config.py          # All configuration
+│   ├── main.py            # Pipeline orchestration
+│   ├── ui/
+│   │   └── app.py         # Streamlit web interface
+│   ├── detection/
+│   │   ├── yolo_detector.py
+│   │   └── tracker.py
+│   ├── models/
+│   │   ├── cnn_feature_extractor.py
+│   │   ├── lstm_classifier.py
+│   │   ├── deep_pipeline.py
+│   │   └── train_deep_model.py
+│   ├── analysis/
+│   │   ├── intent_scorer.py
+│   │   ├── bias_aware_scorer.py
+│   │   ├── alert_generator.py
+│   │   └── quality_analyzer.py
+│   ├── video/
+│   │   ├── loader.py
+│   │   └── clip_extractor.py
+│   ├── pos/
+│   │   ├── data_loader.py
+│   │   └── mock_generator.py
+│   └── output/
+│       ├── case_builder.py
+│       └── report_generator.py
+├── models/
+│   ├── yolov8n.pt         # YOLO weights
+│   ├── lstm_classifier.pt # Trained LSTM
+│   └── DigitalWitness_Training.ipynb
+├── data/
+│   ├── training/
+│   │   ├── normal/        # Normal behavior videos
+│   │   └── shoplifting/   # Shoplifting videos
+│   └── videos/            # Test videos
+└── outputs/
+    ├── cases/
+    ├── clips/
+    └── reports/
 ```
 
-### Key Configuration (`src/config.py`)
+## Key Configuration (`src/config.py`)
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `YOLO_CONF_THRESHOLD` | 0.5 | Minimum detection confidence |
-| `CNN_BACKBONE` | resnet18 | CNN architecture |
-| `CNN_FEATURE_DIM` | 512 | Feature vector dimension |
-| `LSTM_HIDDEN_DIM` | 256 | LSTM hidden state size |
-| `LSTM_NUM_LAYERS` | 2 | Number of LSTM layers |
+| `YOLO_CONF_THRESHOLD` | 0.3 | Detection confidence |
+| `CNN_FEATURE_DIM` | 512 | Feature vector size |
+| `LSTM_HIDDEN_DIM` | 256 | LSTM hidden state |
 | `LSTM_SEQUENCE_LENGTH` | 30 | Frames per sequence |
-| `ALERT_THRESHOLD` | 0.5 | Minimum score for alert |
+| `ALERT_THRESHOLD` | 0.5 | Alert trigger threshold |
 
-### Data Flow
+## Training
 
-- **Training Data:** Videos in `data/training/normal/` and `data/training/shoplifting/`
-- **Input Videos:** Video files in `data/videos/`, POS JSON in `data/pos/`
-- **Models:**
-  - YOLO: `models/yolov8n.pt` (auto-downloaded)
-  - CNN: ResNet18 (pretrained ImageNet)
-  - LSTM: `models/lstm_classifier.pt` (trained)
-- **Output:**
-  - Case files in `outputs/cases/`
-  - Forensic clips in `outputs/clips/`
-  - PDF reports in `outputs/reports/`
-  - Forensic packages in `outputs/forensic_packages/`
+The notebook `models/DigitalWitness_Training.ipynb` trains the LSTM classifier:
+- Extracts CNN features from videos
+- Trains bidirectional LSTM with attention
+- Saves model to `models/lstm_classifier.pt`
 
-### POS JSON Format
-```json
-{
-  "transactions": [{
-    "transaction_id": "TXN001",
-    "timestamp": "2026-01-19T20:17:00",
-    "items": [{"sku": "ITEM001", "name": "Product", "quantity": 1, "price": 2.99}],
-    "total": 2.99,
-    "payment_method": "card"
-  }]
-}
-```
+**Note:** YOLOv8 uses pretrained weights (auto-downloaded). Only the LSTM is trained on your dataset.
 
-## Key Features
+## Classes
 
-| Feature | Description |
-|---------|-------------|
-| **YOLO Detection** | Detects persons, products, bags, bottles, etc. |
-| **Multi-Object Tracking** | Maintains object identity across frames |
-| **Interaction Detection** | Detects pickup, hold, conceal, approach |
-| **CNN Features** | Extracts 512-dim spatial features per frame |
-| **LSTM Classification** | Classifies: normal, pickup, concealment, bypass |
-| **Attention Mechanism** | Highlights important temporal segments |
-| **Bias Detection** | Identifies potential bias in predictions |
-| **Quality Analysis** | Assesses video quality for reliability |
-| **Edge Case Handling** | Handles occlusion, low confidence |
-| **Forensic Reports** | PDF reports with evidence |
-| **Annotated Clips** | Video clips with pose overlays |
-
-## Design Patterns
-
-- **Context Managers:** `VideoLoader`, `PoseEstimator`, `DeepPipeline` use `with` statements
-- **Lazy Initialization:** Deep learning models load only when needed
-- **Dataclasses:** Type-safe structures (Detection, IntentPrediction, etc.)
-- **Centralized Config:** All constants in `src/config.py`
-- **Explainability First:** All scores include component breakdowns
-- **Human-in-Loop:** Alerts always require human review
+| Class | Description |
+|-------|-------------|
+| `normal` | Regular shopping behavior |
+| `shoplifting` | Suspicious/theft behavior |
 
 ## Requirements
 
 - Python 3.8+
-- GPU recommended (CUDA) for faster inference
-- ~4GB RAM minimum
-- Dependencies: PyTorch, Ultralytics (YOLO), OpenCV, MediaPipe
-
-## Current Limitations
-
-- Pre-recorded videos only (no live feed)
-- Mock POS data (no real POS integration)
-- 4 behavior classes (normal, pickup, concealment, bypass)
-- Single-machine processing
+- PyTorch, Ultralytics (YOLO), OpenCV, MediaPipe
+- GPU recommended for faster inference

@@ -1,0 +1,926 @@
+[
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 0.0,
+    "end_time": 1.0,
+    "start_frame": 0,
+    "end_frame": 30,
+    "confidence": 0.9999996423721313,
+    "probabilities": {
+      "normal": 3.2600718213871005e-07,
+      "shoplifting": 0.9999996423721313
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 0.5,
+    "end_time": 1.5,
+    "start_frame": 15,
+    "end_frame": 45,
+    "confidence": 0.9999991655349731,
+    "probabilities": {
+      "normal": 7.865116913308157e-07,
+      "shoplifting": 0.9999991655349731
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 1.0,
+    "end_time": 2.0,
+    "start_frame": 30,
+    "end_frame": 60,
+    "confidence": 0.999998927116394,
+    "probabilities": {
+      "normal": 1.041406108015508e-06,
+      "shoplifting": 0.999998927116394
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 1.5,
+    "end_time": 2.5,
+    "start_frame": 45,
+    "end_frame": 75,
+    "confidence": 0.9999984502792358,
+    "probabilities": {
+      "normal": 1.5653848777219537e-06,
+      "shoplifting": 0.9999984502792358
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 2.0,
+    "end_time": 3.0,
+    "start_frame": 60,
+    "end_frame": 90,
+    "confidence": 0.9999984502792358,
+    "probabilities": {
+      "normal": 1.560411078571633e-06,
+      "shoplifting": 0.9999984502792358
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 2.5,
+    "end_time": 3.5,
+    "start_frame": 75,
+    "end_frame": 105,
+    "confidence": 0.9999977350234985,
+    "probabilities": {
+      "normal": 2.3153213533078087e-06,
+      "shoplifting": 0.9999977350234985
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 3.0,
+    "end_time": 4.0,
+    "start_frame": 90,
+    "end_frame": 120,
+    "confidence": 0.9999977350234985,
+    "probabilities": {
+      "normal": 2.227415052402648e-06,
+      "shoplifting": 0.9999977350234985
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 3.5,
+    "end_time": 4.5,
+    "start_frame": 105,
+    "end_frame": 135,
+    "confidence": 0.9999997615814209,
+    "probabilities": {
+      "normal": 2.7671595148603956e-07,
+      "shoplifting": 0.9999997615814209
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 4.0,
+    "end_time": 5.0,
+    "start_frame": 120,
+    "end_frame": 150,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.955140298079641e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 4.5,
+    "end_time": 5.5,
+    "start_frame": 135,
+    "end_frame": 165,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.0738916955688182e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 5.0,
+    "end_time": 6.0,
+    "start_frame": 150,
+    "end_frame": 180,
+    "confidence": 0.9999996423721313,
+    "probabilities": {
+      "normal": 3.738831537702936e-07,
+      "shoplifting": 0.9999996423721313
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 5.5,
+    "end_time": 6.5,
+    "start_frame": 165,
+    "end_frame": 195,
+    "confidence": 0.9999994039535522,
+    "probabilities": {
+      "normal": 6.335569082693837e-07,
+      "shoplifting": 0.9999994039535522
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 6.0,
+    "end_time": 7.0,
+    "start_frame": 180,
+    "end_frame": 210,
+    "confidence": 0.9999995231628418,
+    "probabilities": {
+      "normal": 4.681769496528432e-07,
+      "shoplifting": 0.9999995231628418
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 6.5,
+    "end_time": 7.5,
+    "start_frame": 195,
+    "end_frame": 225,
+    "confidence": 0.9999995231628418,
+    "probabilities": {
+      "normal": 4.7100414235501376e-07,
+      "shoplifting": 0.9999995231628418
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 7.0,
+    "end_time": 8.0,
+    "start_frame": 210,
+    "end_frame": 240,
+    "confidence": 0.9999991655349731,
+    "probabilities": {
+      "normal": 8.935485311667435e-07,
+      "shoplifting": 0.9999991655349731
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 7.5,
+    "end_time": 8.5,
+    "start_frame": 225,
+    "end_frame": 255,
+    "confidence": 0.9999991655349731,
+    "probabilities": {
+      "normal": 8.809134897092008e-07,
+      "shoplifting": 0.9999991655349731
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 8.0,
+    "end_time": 9.0,
+    "start_frame": 240,
+    "end_frame": 270,
+    "confidence": 0.999998927116394,
+    "probabilities": {
+      "normal": 1.0698137202780345e-06,
+      "shoplifting": 0.999998927116394
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 8.5,
+    "end_time": 9.5,
+    "start_frame": 255,
+    "end_frame": 285,
+    "confidence": 0.9999991655349731,
+    "probabilities": {
+      "normal": 8.413506975557539e-07,
+      "shoplifting": 0.9999991655349731
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 9.0,
+    "end_time": 10.0,
+    "start_frame": 270,
+    "end_frame": 300,
+    "confidence": 0.9999992847442627,
+    "probabilities": {
+      "normal": 7.187908295236412e-07,
+      "shoplifting": 0.9999992847442627
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 9.5,
+    "end_time": 10.5,
+    "start_frame": 285,
+    "end_frame": 315,
+    "confidence": 0.9999996423721313,
+    "probabilities": {
+      "normal": 3.672990658287745e-07,
+      "shoplifting": 0.9999996423721313
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 10.0,
+    "end_time": 11.0,
+    "start_frame": 300,
+    "end_frame": 330,
+    "confidence": 0.9999995231628418,
+    "probabilities": {
+      "normal": 4.6234140427259263e-07,
+      "shoplifting": 0.9999995231628418
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 10.5,
+    "end_time": 11.5,
+    "start_frame": 315,
+    "end_frame": 345,
+    "confidence": 0.9999986886978149,
+    "probabilities": {
+      "normal": 1.3233079698693473e-06,
+      "shoplifting": 0.9999986886978149
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 11.0,
+    "end_time": 12.0,
+    "start_frame": 330,
+    "end_frame": 360,
+    "confidence": 0.9999994039535522,
+    "probabilities": {
+      "normal": 6.455729248955322e-07,
+      "shoplifting": 0.9999994039535522
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 11.5,
+    "end_time": 12.5,
+    "start_frame": 345,
+    "end_frame": 375,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.042566352311042e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 12.0,
+    "end_time": 13.0,
+    "start_frame": 360,
+    "end_frame": 390,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 1.8727551065467196e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 12.5,
+    "end_time": 13.5,
+    "start_frame": 375,
+    "end_frame": 405,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 1.8109867383486744e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 13.0,
+    "end_time": 14.0,
+    "start_frame": 390,
+    "end_frame": 420,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.3963125645186665e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 13.5,
+    "end_time": 14.5,
+    "start_frame": 405,
+    "end_frame": 435,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.108894640670769e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 14.0,
+    "end_time": 15.0,
+    "start_frame": 420,
+    "end_frame": 450,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.1689887925476796e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 14.5,
+    "end_time": 15.5,
+    "start_frame": 435,
+    "end_frame": 465,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 6.09579799970561e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 15.0,
+    "end_time": 16.0,
+    "start_frame": 450,
+    "end_frame": 480,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 6.060982116196101e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 15.5,
+    "end_time": 16.5,
+    "start_frame": 465,
+    "end_frame": 495,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.923069868960738e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 16.0,
+    "end_time": 17.0,
+    "start_frame": 480,
+    "end_frame": 510,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.6388360769024075e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 16.5,
+    "end_time": 17.5,
+    "start_frame": 495,
+    "end_frame": 525,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.0117337956880874e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 17.0,
+    "end_time": 18.0,
+    "start_frame": 510,
+    "end_frame": 540,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.1589718335899306e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 17.5,
+    "end_time": 18.5,
+    "start_frame": 525,
+    "end_frame": 555,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 8.438322396386866e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 18.0,
+    "end_time": 19.0,
+    "start_frame": 540,
+    "end_frame": 570,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.0095035207768888e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 18.5,
+    "end_time": 19.5,
+    "start_frame": 555,
+    "end_frame": 585,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 8.19914802718813e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 19.0,
+    "end_time": 20.0,
+    "start_frame": 570,
+    "end_frame": 600,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 9.306867099212468e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 19.5,
+    "end_time": 20.5,
+    "start_frame": 585,
+    "end_frame": 615,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.2343572564077476e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 20.0,
+    "end_time": 21.0,
+    "start_frame": 600,
+    "end_frame": 630,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.410793970535451e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 20.5,
+    "end_time": 21.5,
+    "start_frame": 615,
+    "end_frame": 645,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.1576222647136092e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 21.0,
+    "end_time": 22.0,
+    "start_frame": 630,
+    "end_frame": 660,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.0961527152630879e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 21.5,
+    "end_time": 22.5,
+    "start_frame": 645,
+    "end_frame": 675,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.011249537441472e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 22.0,
+    "end_time": 23.0,
+    "start_frame": 660,
+    "end_frame": 690,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.0095151026234817e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 22.5,
+    "end_time": 23.5,
+    "start_frame": 675,
+    "end_frame": 705,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.0005781803101854e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 23.0,
+    "end_time": 24.0,
+    "start_frame": 690,
+    "end_frame": 720,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.270377011536766e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 23.5,
+    "end_time": 24.5,
+    "start_frame": 705,
+    "end_frame": 735,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.285384219178013e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 24.0,
+    "end_time": 25.0,
+    "start_frame": 720,
+    "end_frame": 750,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.585449969203182e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 24.5,
+    "end_time": 25.5,
+    "start_frame": 735,
+    "end_frame": 765,
+    "confidence": 0.9999997615814209,
+    "probabilities": {
+      "normal": 1.8373478383182373e-07,
+      "shoplifting": 0.9999997615814209
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 25.0,
+    "end_time": 26.0,
+    "start_frame": 750,
+    "end_frame": 780,
+    "confidence": 0.9999997615814209,
+    "probabilities": {
+      "normal": 2.8304071975071565e-07,
+      "shoplifting": 0.9999997615814209
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 25.5,
+    "end_time": 26.5,
+    "start_frame": 765,
+    "end_frame": 795,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 1.3164198264803417e-07,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 26.0,
+    "end_time": 27.0,
+    "start_frame": 780,
+    "end_frame": 810,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 9.722253935251501e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 26.5,
+    "end_time": 27.5,
+    "start_frame": 795,
+    "end_frame": 825,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 8.22361201358035e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 27.0,
+    "end_time": 28.0,
+    "start_frame": 810,
+    "end_frame": 840,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.390293887965527e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 27.5,
+    "end_time": 28.5,
+    "start_frame": 825,
+    "end_frame": 855,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.699640036662458e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 28.0,
+    "end_time": 29.0,
+    "start_frame": 840,
+    "end_frame": 870,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.8873609987131204e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 28.5,
+    "end_time": 29.5,
+    "start_frame": 855,
+    "end_frame": 885,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.766335675616574e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 29.0,
+    "end_time": 30.0,
+    "start_frame": 870,
+    "end_frame": 900,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.810508696413308e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 29.5,
+    "end_time": 30.5,
+    "start_frame": 885,
+    "end_frame": 915,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.435849376704937e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 30.0,
+    "end_time": 31.0,
+    "start_frame": 900,
+    "end_frame": 930,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.772321642893985e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 30.5,
+    "end_time": 31.5,
+    "start_frame": 915,
+    "end_frame": 945,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 8.13171183722261e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 31.0,
+    "end_time": 32.0,
+    "start_frame": 930,
+    "end_frame": 960,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 6.039103084276576e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 31.5,
+    "end_time": 32.5,
+    "start_frame": 945,
+    "end_frame": 975,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.533768808798413e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 32.0,
+    "end_time": 33.0,
+    "start_frame": 960,
+    "end_frame": 990,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 9.898741382130538e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 32.5,
+    "end_time": 33.5,
+    "start_frame": 975,
+    "end_frame": 1005,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 7.815165758984222e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 33.0,
+    "end_time": 34.0,
+    "start_frame": 990,
+    "end_frame": 1020,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.260271424527673e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 33.5,
+    "end_time": 34.5,
+    "start_frame": 1005,
+    "end_frame": 1035,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.1429333802179826e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 34.0,
+    "end_time": 35.0,
+    "start_frame": 1020,
+    "end_frame": 1050,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.454434332501478e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 34.5,
+    "end_time": 35.5,
+    "start_frame": 1035,
+    "end_frame": 1065,
+    "confidence": 0.9999998807907104,
+    "probabilities": {
+      "normal": 6.151147147193115e-08,
+      "shoplifting": 0.9999998807907104
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 35.0,
+    "end_time": 36.0,
+    "start_frame": 1050,
+    "end_frame": 1080,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 5.568186267623787e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 35.5,
+    "end_time": 36.5,
+    "start_frame": 1065,
+    "end_frame": 1095,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 4.222967930900268e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 36.0,
+    "end_time": 37.0,
+    "start_frame": 1080,
+    "end_frame": 1110,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 3.286800165369641e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 36.5,
+    "end_time": 37.5,
+    "start_frame": 1095,
+    "end_frame": 1125,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 2.428369683116216e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 37.0,
+    "end_time": 38.0,
+    "start_frame": 1110,
+    "end_frame": 1140,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 1.9227801573151737e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 37.5,
+    "end_time": 38.5,
+    "start_frame": 1125,
+    "end_frame": 1155,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 1.88996853722756e-08,
+      "shoplifting": 1.0
+    }
+  },
+  {
+    "behavior_type": "shoplifting",
+    "start_time": 38.0,
+    "end_time": 39.0,
+    "start_frame": 1140,
+    "end_frame": 1170,
+    "confidence": 1.0,
+    "probabilities": {
+      "normal": 2.1794560822741005e-08,
+      "shoplifting": 1.0
+    }
+  }
+]

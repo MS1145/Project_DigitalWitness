@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(.venv/Scripts/python.exe -m py_compile:*)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(python run.py:*)",
+      "Bash(git log:*)",
+      "Bash(timeout:*)"
     ]
   }
 }

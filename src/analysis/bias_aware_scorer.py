@@ -228,12 +228,20 @@ class BiasAwareScorer:
         Apply bias adjustment to raw score.
 
         Uses a nuanced approach that considers score magnitude.
+        Important: When raw score is high (clear LSTM detection), we don't
+        want bias concerns to completely negate the detection. The LSTM
+        model has been trained specifically for shoplifting detection.
         """
-        # For high raw scores with bias concerns, apply stronger adjustment
-        if raw_score > 0.7 and adjustment_factor < 1.0:
-            # More aggressive adjustment for high scores with bias
-            adjusted = raw_score * adjustment_factor * 0.9
+        # For high raw scores (clear shoplifting detection from LSTM),
+        # apply a gentler adjustment to respect the model's classification
+        if raw_score >= 0.5:
+            # The LSTM detected suspicious behavior - don't reduce too aggressively
+            # Apply square root of adjustment factor to soften the reduction
+            # This means: 0.6 factor becomes 0.77, preserving more of the signal
+            softened_factor = (adjustment_factor ** 0.5)
+            adjusted = raw_score * softened_factor
         else:
+            # For low scores, apply normal adjustment
             adjusted = raw_score * adjustment_factor
 
         # Ensure score stays in valid range

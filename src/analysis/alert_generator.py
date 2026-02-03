@@ -37,6 +37,7 @@ class Alert:
     discrepancy_summary: str
     behavior_summary: str
     requires_human_review: bool = True  # Always True - system is advisory only
+    notes: Optional[str] = None        # Additional notes (e.g., fairness info)
 
     def to_dict(self) -> dict:
         """Convert alert to dictionary for serialization."""
@@ -57,7 +58,8 @@ class Alert:
             ],
             "discrepancy_summary": self.discrepancy_summary,
             "behavior_summary": self.behavior_summary,
-            "requires_human_review": self.requires_human_review
+            "requires_human_review": self.requires_human_review,
+            "notes": self.notes
         }
 
 
