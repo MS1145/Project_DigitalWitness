@@ -10,8 +10,21 @@ plotly
 joblib
 Pillow
 
+<<<<<<< HEAD
 # Phase 2: Real-time and API dependencies
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.0.0
 python-multipart>=0.0.6
+=======
+# Deep Learning (YOLO + CNN + LSTM)
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+
+# Report Generation
+reportlab>=4.0.0
+
+# Optional: SHAP for explainability (commented out - heavy dependency)
+# shap>=0.42.0
+>>>>>>> MVP

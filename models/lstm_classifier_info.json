@@ -1,0 +1,17 @@
+{
+  "training_date": "2026-01-30T05:55:29.165268",
+  "n_train_samples": 1397,
+  "n_val_samples": 349,
+  "n_normal_videos": 90,
+  "n_shoplifting_videos": 92,
+  "sequence_length": 30,
+  "stride": 15,
+  "input_dim": 512,
+  "epochs": 50,
+  "final_train_acc": 0.9327129563350036,
+  "final_val_acc": 0.9398280802292264,
+  "classes": [
+    "normal",
+    "shoplifting"
+  ]
+}

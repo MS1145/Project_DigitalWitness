@@ -10,7 +10,9 @@
       "Bash(powershell -Command \"Get-ChildItem -Force | Select-Object Name, Mode\")",
       "Bash(dir:*)",
       "Bash(python -m py_compile:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(del \"C:\\\\Users\\\\MSI\\\\Music\\\\Project_DigitalWitness\\\\src\\\\pose\\\\train_classifier.py\")"
     ]
   }
 }
