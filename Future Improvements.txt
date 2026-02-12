@@ -1,0 +1,145 @@
+Future Improvements - Digital Witness
+======================================
+
+Items pending implementation. POS connection is excluded (tracked separately).
+
+
+========================================================================
+1. NOTEBOOK - PENDING ADDITIONS
+========================================================================
+
+1.1 YOLO Fine-Tuning Cells
+    - Add cells to notebook for fine-tuning YOLO26n with annotated retail data
+    - Upload annotation file to Google Drive, reference in notebook
+    - Use: model.train(data='path/to/data.yaml')
+
+1.2 CNN Fine-Tuning (Conditional)
+    - Run the t-SNE + linear probe cells already in notebook first
+    - If linear probe accuracy < 75%, add fine-tuning cells for MobileNetV3
+    - If >= 75%, CNN features are good enough as-is
+
+1.3 Video-Level Dataset Split
+    - Current split is at sequence level (data leakage risk)
+    - Fix: split at video level so no sequences from the same video
+      appear in both train and validation sets
+
+1.4 End-to-End Pipeline Evaluation
+    - Add section that runs raw test videos through full YOLO -> CNN -> LSTM
+    - Measure video-level accuracy, not just sequence-level
+    - Report per-stage metrics (YOLO detection rate, CNN feature quality, LSTM accuracy)
+
+
+========================================================================
+2. PERFORMANCE OPTIMIZATIONS
+========================================================================
+
+2.1 ONNX Runtime Export (Priority: High)
+    - Export YOLO, MobileNetV3, LSTM to ONNX format
+    - Replace PyTorch inference with onnxruntime
+    - Expected: 2-4x speedup, 50-70% less RAM
+    - YOLO already has model.export(format="onnx") built in
+
+2.2 Aggressive Frame Reduction (Priority: Medium)
+    - Increase FRAME_SKIP from 3 to 10-15 (2-3 FPS is enough for shoplifting)
+    - Downscale video to 640x360 before CNN processing
+    - Reduce LSTM_SEQUENCE_LENGTH from 30 to 15
+    - Expected: 3-5x speedup from frame_step alone
+
+2.3 Edge-Cloud Split Architecture (Priority: Low)
+    - Pi handles: video capture + YOLO detection only
+    - Server handles: CNN + LSTM + scoring + reporting
+    - Pi sends cropped ROIs via HTTP/WebSocket
+    - Required for production Raspberry Pi deployment
+
+2.4 Hardware Accelerator (Priority: Low)
+    - Google Coral USB ($60) or Hailo-8L for Pi 5
+    - Runs TFLite models at 100+ FPS for detection
+    - YOLO goes from ~50ms to ~5ms per frame on Pi
+
+
+========================================================================
+3. ARCHITECTURE FIXES
+========================================================================
+
+3.1 Binary vs Multi-Class Mismatch
+    - Training uses 2 classes (normal, shoplifting)
+    - Config defines 4 classes (normal, pickup, concealment, bypass)
+    - Need to align: either train with 4 classes or simplify config to 2
+
+3.2 Confidence Calibration
+    - Add temperature scaling on model outputs
+    - Ensures predicted probabilities match actual accuracy
+
+3.3 Data Augmentation in Training
+    - Horizontal flip, brightness/contrast variations
+    - Improves generalization to different environments
+
+
+========================================================================
+4. RESEARCH-LEVEL ENHANCEMENTS (Long-term / Thesis)
+========================================================================
+
+4.1 Leverage MediaPipe Pose
+    - Already in requirements but not used in deep pipeline
+    - Add pose keypoint features as additional CNN input
+    - Privacy-preserving (no facial features needed)
+
+4.2 Person Re-Identification (Siamese Networks)
+    - Track same person across multiple cameras
+    - Cross-check at checkout (concealed item but still paid?)
+    - Part of multi-component system achieving 95% accuracy
+
+4.3 Skeleton-Based GCN (ST-GCN) Dual-Stream
+    - YOLO -> Pose Estimation -> ST-GCN (skeleton stream)
+    - YOLO -> MobileNetV3 -> LSTM (appearance stream)
+    - Late fusion -> Intent Score
+    - Benefits: privacy-preserving, novelty for thesis
+
+4.4 Replace LSTM with Transformer
+    - TimeSformer or ViViT for temporal modeling
+    - Better long-range temporal dependencies
+    - No need for separate CNN feature extraction
+
+4.5 GRU Variant Comparison
+    - Compare LSTM vs GRU performance
+    - GRU has fewer parameters, faster training
+    - Similar performance for moderate-length sequences
+
+4.6 Pre-Crime Behavior (PCB) Labeling
+    - From 3D CNN research paper
+    - Relabel training data: SCM (theft moment), CCM (obvious intent), PCB (early cues)
+    - Detect suspicious behavior BEFORE actual theft
+
+4.7 Teacher-Student Training (pi-VAD approach)
+    - Train with 5 modalities (pose, depth, optical flow, masks, text)
+    - Inference uses RGB only (student model)
+    - UCF-Crime AUC: 90.33%
+
+4.8 Mixture of Experts (GS-MoE approach)
+    - Separate expert networks for different behavior types
+    - Better class-specific discrimination
+    - Gaussian pseudo-labels for temporal anomaly duration
+
+4.9 3D CNN Branch
+    - Parallel 3D convolution for motion features
+    - Captures spatiotemporal patterns in single operation
+    - Trade-off: less interpretable than attention-based LSTM
+
+4.10 Replace Pipeline with MediaPipe/MoveNet
+     - Most radical option for edge deployment
+     - Single lightweight model + rule-based classifier
+     - 30+ FPS on Raspberry Pi
+     - Trade-off: less sophisticated than 3-model stack
+
+
+========================================================================
+REFERENCES
+========================================================================
+
+- Martinez-Mascorro et al. - "Suspicious Behavior Detection on Shoplifting Cases" (3D CNN, PCB)
+- Majhi et al. - "pi-VAD: Poly-modal Induced Video Anomaly Detection" (Teacher-Student)
+- D'Amicantonio et al. - "GS-MoE for Weakly-Supervised VAD" (Gaussian + MoE)
+- Multi-component system: https://link.springer.com/article/10.1007/s11760-025-04543-4
+- Hybrid CNN-BiLSTM: https://www.mdpi.com/2076-3417/13/14/8341
+- Pose anomaly detection: https://arxiv.org/pdf/2501.06591
+- UCF-Crime benchmark: https://paperswithcode.com/dataset/ucf-crime
