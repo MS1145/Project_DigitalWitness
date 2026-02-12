@@ -1,0 +1,161 @@
+  Your pipeline processes every frame through 3 sequential neural networks   plus tracking, all synchronously on CPU:
+  Stage: YOLO v8n detection + ByteTrack
+  Per-Frame Cost (CPU): ~30-50ms
+  Component: yolo_detector.py:303
+  ────────────────────────────────────────
+  Stage: ResNet18 CNN feature extraction
+  Per-Frame Cost (CPU): ~20-50ms
+  Component: cnn_feature_extractor.py:222-224
+  ────────────────────────────────────────
+  Stage: LSTM classification (per window)
+  Per-Frame Cost (CPU): ~5-10ms
+  Component: lstm_classifier.py
+  ────────────────────────────────────────
+  Stage: OpenCV decode + BGR→RGB + resize
+  Per-Frame Cost (CPU): ~5-10ms
+  Component: scattered
+  ────────────────────────────────────────
+  Stage: Total per frame
+  Per-Frame Cost (CPU): ~60-120ms
+  Component:
+  For a 30-second video at 30fps with frame_step=3, that's 300 frames ×   
+  ~90ms = ~27 seconds just for the core loop. On a Raspberry Pi, multiply 
+  that by 3-5x due to weaker ARM CPU and limited RAM.
+
+  The 5 core problems:
+
+  1. Three separate neural networks run sequentially per frame
+  (deep_pipeline.py:210-233) - YOLO, then CNN, then features accumulate   
+  for LSTM. No parallelism, no batching.
+  2. Full PyTorch + torchvision + ultralytics in memory - These frameworks   alone consume ~500MB-1GB RAM before any inference. A Pi 4 with 4GB will   struggle.
+  3. ResNet18 on every frame is redundant - You're extracting 512-dim     
+  features from the entire frame (cnn_feature_extractor.py:196), not from 
+  detected person ROIs. Most of those features are background/shelves.    
+  4. No conditional processing - The CNN runs on every sampled frame      
+  regardless of whether YOLO found anything interesting. Empty frames get 
+  the full treatment.
+  5. Streamlit is a heavy web server - Not designed for edge devices. Each   page load re-executes the Python script.
+
+  ---
+  Options for Making This Efficient
+
+  Option A: ONNX Runtime / TFLite Export (Easiest Win)
+
+  Replace PyTorch inference with optimized runtimes:
+  - Export YOLOv8n to ONNX → use onnxruntime (2-4x faster than PyTorch on 
+  CPU)
+  - Export ResNet18 to ONNX or TFLite
+  - Export LSTM to ONNX
+  - Why: PyTorch has massive overhead for inference. ONNX Runtime and     
+  TFLite are built specifically for fast inference. YOLOv8 already has    
+  model.export(format="onnx") built in.
+  - Impact: 2-4x speedup, ~50-70% less RAM usage since you drop PyTorch   
+  entirely at runtime.
+
+  Option B: Replace ResNet18 with MobileNetV3-Small
+
+  Your CNN backbone is the second biggest cost. MobileNetV3-Small is      
+  designed for edge:
+  - ResNet18: ~11.7M parameters, ~1.8 GFLOPs
+  - MobileNetV3-Small: ~2.5M parameters, ~0.06 GFLOPs (30x fewer FLOPs)   
+  - You already have the mobilenet_v2 path in
+  cnn_feature_extractor.py:123-125 but aren't using it. MobileNetV3-Small 
+  would be even better.
+  - Impact: CNN stage goes from ~30ms to ~5ms per frame on CPU.
+
+  Option C: Conditional Pipeline (Skip Empty Frames)
+
+  Right now in deep_pipeline.py:229-233, the CNN runs on every frame.     
+  Change the logic to:
+  1. Run YOLO first (lightweight nano model)
+  2. If no persons detected → skip CNN entirely
+  3. If persons detected → run CNN only on the person ROI, not the full   
+  frame
+  4. Only accumulate features for LSTM when there's something to analyze  
+
+  In a typical retail camera, most frames are empty or just people walking   by. This could eliminate 50-80% of CNN calls.
+
+  Option D: Edge-Cloud Split Architecture
+
+  For the Raspberry Pi specifically:
+  - Pi handles: Video capture + YOLO-nano detection only (lightweight)    
+  - Remote server handles: CNN feature extraction + LSTM classification + 
+  scoring + reporting
+  - Pi sends only detection bounding boxes + small cropped ROIs (a few KB)   to the server via HTTP/WebSocket
+  - Why: This is how production surveillance systems actually work. The   
+  camera is dumb, the server is smart.
+  - Impact: Pi only needs to run one small model. All heavy lifting       
+  happens elsewhere.
+
+  Option E: Hardware Accelerator for Pi
+
+  If you want the full pipeline on the Pi:
+  - Google Coral USB Accelerator (~$60) - runs TFLite models at ~100+ FPS 
+  for detection
+  - Hailo-8L (built into Pi 5 AI Kit) - 13 TOPS of AI inference
+  - These handle YOLO inference in hardware, freeing the CPU for CNN/LSTM.  - Impact: YOLO goes from ~50ms to ~5ms per frame on Pi.
+
+  Option F: Aggressive Frame Reduction + Lower Resolution
+
+  Quick config changes with no code rewrite:
+  - Change frame_step from 3 to 10-15 (you don't need 10 FPS analysis for 
+  shoplifting detection - 2-3 FPS is plenty)
+  - Downscale video to 640x360 before processing (YOLO handles this, but  
+  the CNN gets full-res frames)
+  - Reduce LSTM_SEQUENCE_LENGTH from 30 to 15 (shorter windows, faster    
+  classification)
+  - Reduce SLIDING_WINDOW_STRIDE proportionally
+  - Impact: 3-5x speedup from frame_step alone, another 2x from resolution   reduction.
+
+  Option G: Replace the Pipeline Architecture Entirely
+
+  The most radical but most efficient for edge:
+  - Replace YOLO + ResNet18 + LSTM with a single unified model like       
+  MoveNet + a lightweight temporal classifier
+  - Or use MediaPipe (which you already have in requirements but aren't   
+  using in the deep pipeline) for pose estimation + a simple rule-based   
+  behavior classifier
+  - MediaPipe is specifically optimized for edge/mobile and runs at 30+   
+  FPS on a Pi
+  - Tradeoff: Less sophisticated than the current 3-model stack, but      
+  dramatically faster
+
+  ---
+  My Recommendation (Ranked by Impact/Effort)
+  Priority: 1
+  Option: F - Increase frame_step to 10, reduce resolution
+  Effort: Config change only
+  Speedup: 3-5x
+  ────────────────────────────────────────
+  Priority: 2
+  Option: C - Conditional pipeline (skip empty frames)
+  Effort: Small code change
+  Speedup: 2-4x
+  ────────────────────────────────────────
+  Priority: 3
+  Option: A - ONNX export for all models
+  Effort: Moderate
+  Speedup: 2-4x
+  ────────────────────────────────────────
+  Priority: 4
+  Option: B - Swap ResNet18 for MobileNetV3
+  Effort: Moderate (retrain LSTM)
+  Speedup: 2-3x on CNN stage
+  ────────────────────────────────────────
+  Priority: 5
+  Option: D - Edge-cloud split
+  Effort: Architecture rework
+  Speedup: Makes Pi viable
+  ────────────────────────────────────────
+  Priority: 6
+  Option: E - Coral/Hailo accelerator
+  Effort: Hardware purchase
+  Speedup: 10x on detection
+  Options 1+2+3 combined could get you from ~27 seconds down to ~3-5      
+  seconds for a 30-second video on your laptop, and make the Pi at least  
+  usable. Option D is what you'd want for a production Raspberry Pi       
+  deployment.
+
+  Which of these directions interests you most? I can dig into your       
+  research papers too if you want me to cross-reference them with these   
+  approaches.

@@ -33,7 +33,8 @@ from ..config import (
     LSTM_NUM_LAYERS,      # Number of stacked LSTM layers (2)
     LSTM_SEQUENCE_LENGTH, # Frames per sequence (30)
     LSTM_DROPOUT,         # Dropout for regularization (0.3)
-    INTENT_CLASSES,       # ["normal", "pickup", "concealment", "bypass"]
+    INTENT_CLASSES,       # ["normal", "shoplifting"]
+    CNN_FEATURE_DIM,      # Feature dim from CNN backbone
     MODELS_DIR
 )
 
@@ -73,7 +74,7 @@ class LSTMIntentClassifier:
 
     def __init__(
         self,
-        input_dim: int = 512,
+        input_dim: int = CNN_FEATURE_DIM,
         hidden_dim: int = LSTM_HIDDEN_DIM,
         num_layers: int = LSTM_NUM_LAYERS,
         num_classes: int = len(INTENT_CLASSES),

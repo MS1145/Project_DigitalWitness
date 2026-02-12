@@ -125,17 +125,37 @@ EDGE_CASE_AMBIGUITY_THRESHOLD = 0.2  # Max probability gap for ambiguity
 # DEEP LEARNING MODEL CONFIGURATION
 # ============================================================================
 
-# YOLO Object Detection
-YOLO_MODEL_PATH = MODELS_DIR / "yolov8n.pt"
-YOLO_CONF_THRESHOLD = 0.3            # Lower threshold for better recall (was 0.5)
-YOLO_IOU_THRESHOLD = 0.45            # Slightly lower for crowded scenes (was 0.5)
-YOLO_CLASSES = ["person", "bottle", "cup", "food", "bag"]  # Retail-relevant
+# YOLO Object Detection (YOLO26n - latest, fastest)
+YOLO_MODEL = "yolo26n.pt"            # Latest lightweight YOLO (auto-downloads)
+YOLO_MODEL_PATH = MODELS_DIR / YOLO_MODEL
+YOLO_CONF_THRESHOLD = 0.3            # Lower threshold for better recall
+YOLO_IOU_THRESHOLD = 0.45            # Slightly lower for crowded scenes
 
-# CNN Feature Extraction
-CNN_BACKBONE = "resnet18"            # Backbone architecture
-CNN_FEATURE_DIM = 512                # Output feature dimension
-CNN_PRETRAINED = True                # Use ImageNet pretrained weights
-CNN_INPUT_SIZE = (224, 224)          # Input image size
+# Retail-relevant COCO classes
+RETAIL_CLASS_IDS = {
+    0: "person",
+    24: "backpack", 25: "umbrella", 26: "handbag", 28: "suitcase",
+    39: "bottle", 41: "cup", 46: "banana", 47: "apple", 49: "orange",
+    67: "cell phone", 73: "book"
+}
+PRODUCT_CLASSES = {"bottle", "cup", "handbag", "backpack", "cell phone",
+                   "book", "banana", "apple", "orange", "suitcase", "umbrella"}
+
+# CNN Feature Extraction - Multiple backbone support
+# Options: "mobilenet_v3_small" (recommended), "efficientnet_v2_s", "squeezenet", "resnet18"
+CNN_BACKBONE = "mobilenet_v3_small"
+
+# Backbone configurations (feature_dim, speed)
+CNN_BACKBONE_CONFIGS = {
+    "mobilenet_v3_small": {"feature_dim": 576, "input_size": (224, 224)},  # Fast, good accuracy
+    "efficientnet_v2_s":  {"feature_dim": 1280, "input_size": (224, 224)}, # Best accuracy, slower
+    "squeezenet":         {"feature_dim": 512, "input_size": (224, 224)},  # Fastest, lower accuracy
+    "resnet18":           {"feature_dim": 512, "input_size": (224, 224)},  # Baseline
+}
+
+CNN_FEATURE_DIM = CNN_BACKBONE_CONFIGS[CNN_BACKBONE]["feature_dim"]
+CNN_INPUT_SIZE = CNN_BACKBONE_CONFIGS[CNN_BACKBONE]["input_size"]
+CNN_PRETRAINED = True
 
 # LSTM Temporal Classification
 LSTM_HIDDEN_DIM = 256                # LSTM hidden state dimension
@@ -143,8 +163,22 @@ LSTM_NUM_LAYERS = 2                  # Number of LSTM layers
 LSTM_SEQUENCE_LENGTH = 30            # Frames per sequence
 LSTM_DROPOUT = 0.3                   # Dropout probability
 
-# Intent Classes for Deep Model
-INTENT_CLASSES = ["normal", "pickup", "concealment", "bypass"]
+# Intent Classes (2-class: normal vs shoplifting)
+INTENT_CLASSES = ["normal", "shoplifting"]
+
+# ============================================================================
+# PIPELINE OPTIMIZATION SETTINGS
+# ============================================================================
+
+# Frame Processing
+FRAME_SKIP = 3                       # Process every Nth frame (3 = 10fps effective)
+BATCH_SIZE_EXTRACTION = 16           # Batch size for CNN feature extraction
+
+# Conditional Processing (skip unnecessary frames)
+USE_MOTION_DETECTION = True          # Skip frames without motion
+USE_PERSON_GATE = True               # Only run CNN if person detected
+USE_SCENE_VALIDATION = True          # Validate retail scene
+MOTION_THRESHOLD = 5000              # Pixel change threshold for motion
 
 # ============================================================================
 # BIAS DETECTION

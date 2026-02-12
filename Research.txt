@@ -1,0 +1,166 @@
+Search Keywords for Your Research
+
+  Primary Keywords
+  Category: Core Problem
+  Keywords: shoplifting detection, retail theft detection, suspicious     
+    behavior detection, loss prevention AI
+  ────────────────────────────────────────
+  Category: Technical Approach
+  Keywords: video anomaly detection, action recognition surveillance,     
+    behavior analysis deep learning
+  ────────────────────────────────────────
+  Category: Your Architecture
+  Keywords: CNN-LSTM video classification, YOLO person tracking retail,   
+    temporal behavior analysis
+  ────────────────────────────────────────
+  Category: Emerging Methods
+  Keywords: Video Vision Transformer ViViT, TimeSformer action
+  recognition,
+     ST-GCN skeleton action, transformer anomaly detection
+  Academic Database Queries
+
+  "shoplifting detection" AND "deep learning" AND "video"
+  "retail surveillance" AND ("CNN-LSTM" OR "action recognition")
+  "UCF-Crime" AND "shoplifting" AND "benchmark"
+  "video anomaly detection" AND "transformer" 2024-2026
+  "skeleton-based" AND "action recognition" AND "GCN"
+
+  ---
+  State-of-the-Art Approaches (2025)
+
+  1. Your Current Approach: CNN-LSTM (Solid Foundation)
+  ┌───────────────────────────┬──────────────────────────┐
+  │          Metric           │    Reported Accuracy     │
+  ├───────────────────────────┼──────────────────────────┤
+  │ CNN-BiLSTM Hybrid         │ 81-93%                   │
+  ├───────────────────────────┼──────────────────────────┤
+  │ InceptionV3 + BiLSTM      │ 81%                      │
+  ├───────────────────────────┼──────────────────────────┤
+  │ Time Distributed CNN-LSTM │ 85% activity recognition │
+  └───────────────────────────┴──────────────────────────┘
+  Your pipeline (YOLO → CNN → LSTM) aligns with proven research. However, 
+  there are newer approaches worth considering.
+
+  ---
+  2. Emerging Alternatives
+
+  A. Video Vision Transformers (ViViT / TimeSformer)
+
+  - Captures long-range temporal dependencies better than LSTM
+  - TimeSformer: 82.2% on Kinetics-400
+  - No need for separate CNN feature extraction
+  - https://arxiv.org/abs/2103.15691
+
+  B. Skeleton-Based GCN (ST-GCN / AGCN)
+
+  - Uses pose keypoints instead of raw video
+  - Privacy-preserving (no facial features)
+  - Lighter computation
+  - https://www.ieice.org/publications/conference-FIT-DVDs/FIT2024/data/ht  ml/program/pdf/H-041.pdf
+
+  C. Multi-Component Systems
+
+  Recent research integrates 4 components achieving 95% overall accuracy: 
+  1. Person detection (YOLO)
+  2. Activity recognition (CNN-LSTM)
+  3. Product detection (YOLO)
+  4. Person re-identification (Siamese Networks)
+
+  https://link.springer.com/article/10.1007/s11760-025-04543-4
+
+  ---
+  Comparison: Your Approach vs. Alternatives
+  ┌───────────────────┬──────────┬────────┬─────────┬────────────┐        
+  │     Approach      │ Accuracy │ Speed  │ Privacy │ Complexity │        
+  ├───────────────────┼──────────┼────────┼─────────┼────────────┤        
+  │ Your CNN-LSTM     │ 81-93%   │ Medium │ Low     │ Medium     │        
+  ├───────────────────┼──────────┼────────┼─────────┼────────────┤        
+  │ Video Transformer │ 80-85%   │ Slow   │ Low     │ High       │        
+  ├───────────────────┼──────────┼────────┼─────────┼────────────┤        
+  │ Skeleton GCN      │ 85-90%   │ Fast   │ High    │ Medium     │        
+  ├───────────────────┼──────────┼────────┼─────────┼────────────┤        
+  │ Multi-Component   │ 95%      │ Slow   │ Low     │ Very High  │        
+  └───────────────────┴──────────┴────────┴─────────┴────────────┘        
+  ---
+  Potential Improvements for Your Project
+
+  Option 1: Add Person Re-Identification (Quick Win)
+
+  YOLO → CNN → LSTM → Re-ID → Cross-check at checkout
+  This catches people who conceal items but still go through checkout.    
+
+  Option 2: Hybrid Skeleton + Appearance
+
+  YOLO → Pose Estimation → ST-GCN (skeleton)
+                ↓
+           CNN → LSTM (appearance)
+                ↓
+           Fusion Layer → Intent Score
+  Benefit: Privacy-preserving skeleton + rich appearance features
+
+  Option 3: Replace LSTM with Transformer
+
+  YOLO → CNN → Video Transformer → Intent Score
+  Better long-range temporal modeling.
+
+  ---
+  Key Papers & Resources
+  Paper: Shoplifting Detection with Deep Learning (2025)
+  Focus: Multi-component system
+  Link: https://link.springer.com/article/10.1007/s11760-025-04543-4      
+  ────────────────────────────────────────
+  Paper: Hybrid CNN-BiLSTM Shoplifting Detection
+  Focus: Your approach benchmark
+  Link: https://www.mdpi.com/2076-3417/13/14/8341
+  ────────────────────────────────────────
+  Paper: Pose-Based Anomaly Detection for Retail
+  Focus: Real-world dataset
+  Link: https://arxiv.org/pdf/2501.06591
+  ────────────────────────────────────────
+  Paper: Transformers for Video Anomaly Detection
+  Focus: Transformer overview
+  Link: https://link.springer.com/article/10.1007/s00521-025-11218-1      
+  ────────────────────────────────────────
+  Paper: UCF-Crime Benchmark
+  Focus: Dataset & baselines
+  Link: https://paperswithcode.com/dataset/ucf-crime
+  ────────────────────────────────────────
+  Paper: ST-GCN Skeleton Action
+  Focus: GCN approach
+  Link: https://ojs.aaai.org/index.php/AAAI/article/view/5652/5508        
+  ---
+  Datasets
+  Dataset: UCF-Crime
+  Videos: 1,900
+  Shoplifting Samples: 28
+  Link: https://www.kaggle.com/datasets/odins0n/ucf-crime-dataset
+  ────────────────────────────────────────
+  Dataset: Innovatiana Shoplifting
+  Videos: 150+
+  Shoplifting Samples: All
+  Link: https://www.innovatiana.com/en/datasets/shoplifting-video-dataset 
+  ────────────────────────────────────────
+  Dataset: Custom Retail (suggested)
+  Videos: -
+  Shoplifting Samples: -
+  Link: Collect your own
+  ---
+  My Recommendation
+
+  Given your project constraints (Final Year Project, Colab training), I  
+  suggest:
+
+  Enhanced Pipeline:
+  YOLO26n → Pose Estimation → Dual-Stream
+                                 ├── ST-GCN (skeleton) → lightweight,     
+  privacy-preserving
+                                 └── MobileNetV3 → LSTM (appearance) →    
+  your current approach
+                                          ↓
+                                     Late Fusion → Intent Score
+
+  This gives you:
+  1. Novelty for your thesis (dual-stream fusion)
+  2. Privacy angle (skeleton-based detection)
+  3. Better accuracy through complementary features
+  4. Publishable contribution

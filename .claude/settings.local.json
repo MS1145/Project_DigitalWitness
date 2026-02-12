@@ -5,7 +5,11 @@
       "Bash(.venv/Scripts/python.exe:*)",
       "Bash(python run.py:*)",
       "Bash(git log:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "WebSearch",
+      "Bash(python:*)",
+      "Bash(del \"C:\\\\Users\\\\MSI\\\\Music\\\\Project_DigitalWitness\\\\models\\\\yolov8n.pt\")",
+      "Bash(powershell:*)"
     ]
   }
 }

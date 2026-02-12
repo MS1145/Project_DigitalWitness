@@ -1,20 +1,22 @@
 """
 YOLO-based object detection for Digital Witness.
 
-Uses YOLOv8 to detect persons, products, hands, and other retail-relevant
+Uses YOLO26n (latest) to detect persons, products, and retail-relevant
 objects in video frames. Detection results feed into the CNN-LSTM pipeline
 for temporal behavior analysis.
 
-YOLOv8 Overview:
-----------------
-- "You Only Look Once" - single-pass detection (fast!)
-- YOLOv8n = "nano" variant, optimized for speed over accuracy
+YOLO26n Overview:
+-----------------
+- Latest YOLO version (January 2026)
+- 43% faster CPU inference than predecessors
+- NMS-free end-to-end inference
+- Better small object detection (ProgLoss + STAL)
 - Pretrained on COCO dataset (80 object classes)
 - Built-in tracking via ByteTrack algorithm
 
 Detection Pipeline:
 -------------------
-Frame → YOLOv8 → Bounding Boxes + Class Labels + Confidence Scores
+Frame → YOLO26n → Bounding Boxes + Class Labels + Confidence Scores
                           ↓
               Tracking (ByteTrack maintains IDs across frames)
                           ↓
@@ -33,10 +35,9 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 
 from ..config import (
-    YOLO_MODEL_PATH,       # Path to YOLOv8 weights
-    YOLO_CONF_THRESHOLD,   # 0.5 - minimum detection confidence
-    YOLO_CLASSES,          # Retail-relevant class names
-    YOLO_IOU_THRESHOLD     # 0.5 - for non-max suppression
+    YOLO_MODEL_PATH,       # Path to YOLO weights
+    YOLO_CONF_THRESHOLD,   # Minimum detection confidence
+    YOLO_IOU_THRESHOLD     # For non-max suppression
 )
 
 
@@ -209,8 +210,8 @@ class YOLODetector:
             # Check if model file exists, otherwise download
             model_path = Path(self.model_path)
             if not model_path.exists():
-                # Use pretrained model name directly (will auto-download)
-                self.model = YOLO("yolov8n.pt")
+                # Use YOLO26n - latest, fastest (will auto-download)
+                self.model = YOLO("yolo26n.pt")
             else:
                 self.model = YOLO(str(model_path))
 

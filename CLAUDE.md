@@ -18,9 +18,15 @@ Video -> YOLO -> CNN -> LSTM -> Intent Score -> Alert
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **YOLO** | YOLOv8n | Object detection (persons, products) |
-| **CNN** | ResNet18 | Spatial feature extraction (512-dim) |
+| **YOLO** | YOLO26n | Object detection (persons, products) - 43% faster CPU inference |
+| **CNN** | MobileNetV3-Small | Spatial feature extraction (576-dim) - lightweight, fast |
 | **LSTM** | Bidirectional + Attention | Temporal behavior classification |
+
+### Optimizations
+- Frame skipping (process every Nth frame)
+- Motion detection (skip static frames)
+- Person gate (skip frames without people)
+- Scene validation (detect non-retail/wrong footage early)
 
 ## Commands
 
@@ -71,9 +77,8 @@ Project_DigitalWitness/
 │       ├── case_builder.py
 │       └── report_generator.py
 ├── models/
-│   ├── yolov8n.pt         # YOLO weights
 │   ├── lstm_classifier.pt # Trained LSTM
-│   └── DigitalWitness_Training.ipynb
+│   └── DigitalWitness_Optimized_Training.ipynb  # Colab training notebook
 ├── data/
 │   ├── training/
 │   │   ├── normal/        # Normal behavior videos
@@ -89,20 +94,25 @@ Project_DigitalWitness/
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `YOLO_CONF_THRESHOLD` | 0.3 | Detection confidence |
-| `CNN_FEATURE_DIM` | 512 | Feature vector size |
+| `YOLO_MODEL` | yolo26n.pt | Latest lightweight YOLO model |
+| `CNN_BACKBONE` | mobilenet_v3_small | Feature extraction backbone |
+| `CNN_FEATURE_DIM` | 576 | Feature vector size |
 | `LSTM_HIDDEN_DIM` | 256 | LSTM hidden state |
 | `LSTM_SEQUENCE_LENGTH` | 30 | Frames per sequence |
+| `FRAME_SKIP` | 3 | Process every Nth frame |
 | `ALERT_THRESHOLD` | 0.5 | Alert trigger threshold |
 
 ## Training
 
-The notebook `models/DigitalWitness_Training.ipynb` trains the LSTM classifier:
-- Extracts CNN features from videos
+The notebook `models/DigitalWitness_Optimized_Training.ipynb` trains the LSTM classifier:
+- Downloads UCF-Crime dataset via Kaggle API
+- Compares CNN backbones (MobileNetV3, EfficientNetV2, SqueezeNet)
+- Extracts CNN features with conditional processing
 - Trains bidirectional LSTM with attention
+- Includes checkpointing for Colab disconnects
 - Saves model to `models/lstm_classifier.pt`
 
-**Note:** YOLOv8 uses pretrained weights (auto-downloaded). Only the LSTM is trained on your dataset.
+**Note:** YOLO26n and CNN (MobileNetV3) use pretrained weights (auto-downloaded). Only the LSTM is trained on your dataset.
 
 ## Classes
 
@@ -114,5 +124,5 @@ The notebook `models/DigitalWitness_Training.ipynb` trains the LSTM classifier:
 ## Requirements
 
 - Python 3.8+
-- PyTorch, Ultralytics (YOLO), OpenCV, MediaPipe
-- GPU recommended for faster inference
+- PyTorch, Ultralytics (YOLO), OpenCV, torchvision
+- GPU recommended for faster inference (works on CPU with optimizations)

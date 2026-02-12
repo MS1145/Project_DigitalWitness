@@ -1,36 +1,28 @@
 """
 CNN-based spatial feature extraction for Digital Witness.
 
-Uses a pretrained CNN backbone (ResNet18 by default) to extract
-spatial features from video frames. These features capture visual
-appearance and spatial relationships that complement pose estimation.
+Supports multiple lightweight backbones optimized for speed:
+- MobileNetV3-Small: Best speed/accuracy balance (recommended)
+- EfficientNetV2-S: Highest accuracy, slower
+- SqueezeNet: Fastest, compact, lower accuracy
+- ResNet18: Baseline reference
 
-Why ResNet18?
--------------
-- Pretrained on ImageNet: Already knows how to recognize objects, textures, shapes
-- 512-dimensional output: Rich but compact representation
-- Fast inference: ~5ms per frame on GPU, enabling near real-time processing
-- Transfer learning: Retail/surveillance domain shares visual primitives with ImageNet
-
-Feature Extraction Process:
----------------------------
-1. Resize frame to 224x224 (ImageNet standard)
-2. Normalize using ImageNet mean/std
-3. Pass through ResNet18 (without final classification layer)
-4. Output: 512-dimensional feature vector capturing visual semantics
-
-These features become input to the LSTM for temporal modeling.
+Features:
+- Batch processing for GPU efficiency
+- Pretrained ImageNet weights (transfer learning)
+- Configurable input size
 """
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 from pathlib import Path
 
 from ..config import (
-    CNN_BACKBONE,      # "resnet18" by default
-    CNN_FEATURE_DIM,   # 512 dimensions
-    CNN_PRETRAINED,    # True - use ImageNet weights
-    CNN_INPUT_SIZE     # (224, 224) pixels
+    CNN_BACKBONE,
+    CNN_BACKBONE_CONFIGS,
+    CNN_FEATURE_DIM,
+    CNN_PRETRAINED,
+    CNN_INPUT_SIZE
 )
 
 
@@ -39,58 +31,50 @@ class FrameFeatures:
     """Extracted features for a single frame."""
     frame_number: int
     timestamp: float
-    features: np.ndarray          # Feature vector
-    roi_features: Optional[np.ndarray] = None  # Features from ROI if provided
+    features: np.ndarray
 
 
 @dataclass
 class SequenceFeatures:
-    """Features for a sequence of frames (for LSTM input)."""
+    """Features for a sequence of frames (LSTM input)."""
     sequence_id: str
     start_frame: int
     end_frame: int
     start_time: float
     end_time: float
-    features: np.ndarray          # Shape: (seq_len, feature_dim)
+    features: np.ndarray
     frame_count: int
 
 
 class CNNFeatureExtractor:
     """
-    CNN-based feature extractor using pretrained backbone.
+    CNN feature extractor with multiple backbone support.
 
-    Extracts spatial features from video frames that capture:
-    - Visual appearance
-    - Object presence
-    - Spatial layout
-    - Scene context
-
-    These features complement pose-based features for behavior analysis.
+    Supported backbones:
+    - mobilenet_v3_small: 2.5M params, ~5ms/frame (RECOMMENDED)
+    - efficientnet_v2_s: 21M params, ~25ms/frame (highest accuracy)
+    - squeezenet: 1.2M params, ~3ms/frame (fastest)
+    - resnet18: 11.7M params, ~20ms/frame (baseline)
     """
 
     def __init__(
         self,
         backbone: str = CNN_BACKBONE,
         pretrained: bool = CNN_PRETRAINED,
-        feature_dim: int = CNN_FEATURE_DIM,
-        input_size: Tuple[int, int] = CNN_INPUT_SIZE,
         device: str = "auto"
     ):
-        """
-        Initialize CNN feature extractor.
-
-        Args:
-            backbone: CNN architecture ("resnet18", "resnet34", "mobilenet_v2")
-            pretrained: Use ImageNet pretrained weights
-            feature_dim: Output feature dimension
-            input_size: Input image size (height, width)
-            device: Device for inference ("auto", "cpu", "cuda")
-        """
         self.backbone_name = backbone
         self.pretrained = pretrained
-        self.feature_dim = feature_dim
-        self.input_size = input_size
         self.device_str = device
+
+        # Get config for selected backbone
+        if backbone not in CNN_BACKBONE_CONFIGS:
+            raise ValueError(f"Unknown backbone: {backbone}. "
+                           f"Options: {list(CNN_BACKBONE_CONFIGS.keys())}")
+
+        config = CNN_BACKBONE_CONFIGS[backbone]
+        self.feature_dim = config["feature_dim"]
+        self.input_size = config["input_size"]
 
         self.model = None
         self.transform = None
@@ -102,76 +86,85 @@ class CNNFeatureExtractor:
         if self._initialized:
             return
 
-        try:
-            import torch
-            import torch.nn as nn
-            from torchvision import models, transforms
+        import torch
+        import torch.nn as nn
+        from torchvision import models, transforms
 
-            # Determine device
-            if self.device_str == "auto":
-                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            else:
-                self.device = torch.device(self.device_str)
+        # Determine device
+        if self.device_str == "auto":
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(self.device_str)
 
-            # Load backbone
-            if self.backbone_name == "resnet18":
-                base_model = models.resnet18(pretrained=self.pretrained)
-                base_features = 512
-            elif self.backbone_name == "resnet34":
-                base_model = models.resnet34(pretrained=self.pretrained)
-                base_features = 512
-            elif self.backbone_name == "mobilenet_v2":
-                base_model = models.mobilenet_v2(pretrained=self.pretrained)
-                base_features = 1280
-            else:
-                raise ValueError(f"Unsupported backbone: {self.backbone_name}")
+        # Load backbone
+        self.model = self._load_backbone()
+        self.model = self.model.to(self.device)
+        self.model.eval()
 
-            # Remove classification head
-            if "resnet" in self.backbone_name:
-                self.model = nn.Sequential(*list(base_model.children())[:-1])
-            else:
-                self.model = nn.Sequential(*list(base_model.children())[:-1])
-
-            # Add feature projection if needed
-            if base_features != self.feature_dim:
-                self.model = nn.Sequential(
-                    self.model,
-                    nn.Flatten(),
-                    nn.Linear(base_features, self.feature_dim)
-                )
-            else:
-                self.model = nn.Sequential(
-                    self.model,
-                    nn.Flatten()
-                )
-
-            self.model = self.model.to(self.device)
-            self.model.eval()
-
-            # Image preprocessing
-            self.transform = transforms.Compose([
-                transforms.ToPILImage(),
-                transforms.Resize(self.input_size),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]
-                )
-            ])
-
-            self._initialized = True
-
-        except ImportError:
-            raise ImportError(
-                "PyTorch not installed. Run: pip install torch torchvision"
+        # Image preprocessing (ImageNet normalization)
+        self.transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(self.input_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
             )
+        ])
+
+        self._initialized = True
+
+    def _load_backbone(self):
+        """Load and prepare backbone model."""
+        import torch.nn as nn
+        from torchvision import models
+
+        if self.backbone_name == "mobilenet_v3_small":
+            # MobileNetV3-Small: Fast, good accuracy
+            weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1 if self.pretrained else None
+            base = models.mobilenet_v3_small(weights=weights)
+            model = nn.Sequential(
+                base.features,
+                base.avgpool,
+                nn.Flatten()
+            )
+
+        elif self.backbone_name == "efficientnet_v2_s":
+            # EfficientNetV2-S: Best accuracy
+            weights = models.EfficientNet_V2_S_Weights.IMAGENET1K_V1 if self.pretrained else None
+            base = models.efficientnet_v2_s(weights=weights)
+            model = nn.Sequential(
+                base.features,
+                base.avgpool,
+                nn.Flatten()
+            )
+
+        elif self.backbone_name == "squeezenet":
+            # SqueezeNet: Fastest, most compact
+            weights = models.SqueezeNet1_1_Weights.IMAGENET1K_V1 if self.pretrained else None
+            base = models.squeezenet1_1(weights=weights)
+            model = nn.Sequential(
+                base.features,
+                nn.AdaptiveAvgPool2d(1),
+                nn.Flatten()
+            )
+
+        elif self.backbone_name == "resnet18":
+            # ResNet18: Baseline
+            weights = models.ResNet18_Weights.IMAGENET1K_V1 if self.pretrained else None
+            base = models.resnet18(weights=weights)
+            model = nn.Sequential(*list(base.children())[:-1], nn.Flatten())
+
+        else:
+            raise ValueError(f"Unknown backbone: {self.backbone_name}")
+
+        return model
 
     def extract_features(
         self,
         frame: np.ndarray,
         frame_number: int = 0,
-        timestamp: float = 0.0,
-        roi: Optional[Tuple[int, int, int, int]] = None
+        timestamp: float = 0.0
     ) -> FrameFeatures:
         """
         Extract features from a single frame.
@@ -180,77 +173,83 @@ class CNNFeatureExtractor:
             frame: BGR image as numpy array (H, W, 3)
             frame_number: Frame number
             timestamp: Timestamp in seconds
-            roi: Optional region of interest (x1, y1, x2, y2)
 
         Returns:
             FrameFeatures with extracted feature vector
         """
         self.initialize()
-
         import torch
+        import cv2
 
         # Convert BGR to RGB
-        rgb_frame = frame[:, :, ::-1].copy()
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Extract full frame features
-        features = self._extract_from_image(rgb_frame)
+        # Transform and extract
+        input_tensor = self.transform(rgb_frame).unsqueeze(0).to(self.device)
 
-        # Extract ROI features if provided
-        roi_features = None
-        if roi is not None:
-            x1, y1, x2, y2 = roi
-            roi_image = rgb_frame[y1:y2, x1:x2]
-            if roi_image.size > 0:
-                roi_features = self._extract_from_image(roi_image)
+        with torch.no_grad():
+            features = self.model(input_tensor)
 
         return FrameFeatures(
             frame_number=frame_number,
             timestamp=timestamp,
-            features=features,
-            roi_features=roi_features
+            features=features.squeeze().cpu().numpy()
         )
 
-    def _extract_from_image(self, image: np.ndarray) -> np.ndarray:
-        """Extract features from an image."""
+    def extract_features_batch(self, frames: List[np.ndarray]) -> np.ndarray:
+        """
+        Extract features from a batch of frames (GPU optimized).
+
+        Args:
+            frames: List of BGR images
+
+        Returns:
+            Feature array of shape (batch_size, feature_dim)
+        """
+        self.initialize()
         import torch
+        import cv2
 
-        # Preprocess
-        input_tensor = self.transform(image)
-        input_batch = input_tensor.unsqueeze(0).to(self.device)
+        # Preprocess all frames
+        tensors = []
+        for frame in frames:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            tensors.append(self.transform(rgb))
 
-        # Extract features
+        # Stack and process
+        batch = torch.stack(tensors).to(self.device)
+
         with torch.no_grad():
-            features = self.model(input_batch)
+            features = self.model(batch)
 
-        return features.cpu().numpy().flatten()
+        return features.cpu().numpy()
 
-    def extract_from_detection(
+    def extract_from_roi(
         self,
         frame: np.ndarray,
         bbox: Tuple[int, int, int, int],
         frame_number: int = 0,
         timestamp: float = 0.0,
-        context_ratio: float = 0.2
+        context_ratio: float = 0.1
     ) -> FrameFeatures:
         """
-        Extract features from a detected object region.
+        Extract features from a region of interest (person bbox).
 
         Args:
-            frame: Full frame as numpy array
-            bbox: Detection bounding box (x1, y1, x2, y2)
+            frame: Full frame
+            bbox: Bounding box (x1, y1, x2, y2)
             frame_number: Frame number
             timestamp: Timestamp
             context_ratio: Ratio to expand bbox for context
 
         Returns:
-            FrameFeatures for the detection
+            FrameFeatures for the ROI
         """
         x1, y1, x2, y2 = bbox
         h, w = frame.shape[:2]
 
         # Expand bbox for context
-        width = x2 - x1
-        height = y2 - y1
+        width, height = x2 - x1, y2 - y1
         expand_w = int(width * context_ratio)
         expand_h = int(height * context_ratio)
 
@@ -259,111 +258,16 @@ class CNNFeatureExtractor:
         x2 = min(w, x2 + expand_w)
         y2 = min(h, y2 + expand_h)
 
-        # Crop region
         roi = frame[y1:y2, x1:x2]
 
         if roi.size == 0:
-            # Return zero features for empty ROI
             return FrameFeatures(
                 frame_number=frame_number,
                 timestamp=timestamp,
-                features=np.zeros(self.feature_dim),
-                roi_features=None
+                features=np.zeros(self.feature_dim)
             )
 
-        # Extract features
-        rgb_roi = roi[:, :, ::-1].copy()
-        features = self._extract_from_image(rgb_roi)
-
-        return FrameFeatures(
-            frame_number=frame_number,
-            timestamp=timestamp,
-            features=features,
-            roi_features=None
-        )
-
-    def extract_sequence_features(
-        self,
-        frames: List[np.ndarray],
-        start_frame: int = 0,
-        fps: float = 30.0,
-        sequence_id: str = ""
-    ) -> SequenceFeatures:
-        """
-        Extract features from a sequence of frames for LSTM input.
-
-        Args:
-            frames: List of frames as numpy arrays
-            start_frame: Starting frame number
-            fps: Frames per second
-            sequence_id: Identifier for this sequence
-
-        Returns:
-            SequenceFeatures with shape (seq_len, feature_dim)
-        """
-        self.initialize()
-
-        import torch
-
-        features_list = []
-
-        for i, frame in enumerate(frames):
-            frame_features = self.extract_features(
-                frame,
-                frame_number=start_frame + i,
-                timestamp=(start_frame + i) / fps
-            )
-            features_list.append(frame_features.features)
-
-        # Stack features
-        features_array = np.vstack(features_list)
-
-        return SequenceFeatures(
-            sequence_id=sequence_id,
-            start_frame=start_frame,
-            end_frame=start_frame + len(frames) - 1,
-            start_time=start_frame / fps,
-            end_time=(start_frame + len(frames) - 1) / fps,
-            features=features_array,
-            frame_count=len(frames)
-        )
-
-    def extract_sliding_window_features(
-        self,
-        frames: List[np.ndarray],
-        window_size: int = 30,
-        stride: int = 15,
-        fps: float = 30.0
-    ) -> List[SequenceFeatures]:
-        """
-        Extract features using sliding windows.
-
-        Args:
-            frames: List of all frames
-            window_size: Frames per window
-            stride: Frames to skip between windows
-            fps: Frames per second
-
-        Returns:
-            List of SequenceFeatures, one per window
-        """
-        sequences = []
-        num_frames = len(frames)
-
-        window_idx = 0
-        for start in range(0, num_frames - window_size + 1, stride):
-            window_frames = frames[start:start + window_size]
-
-            seq_features = self.extract_sequence_features(
-                window_frames,
-                start_frame=start,
-                fps=fps,
-                sequence_id=f"window_{window_idx}"
-            )
-            sequences.append(seq_features)
-            window_idx += 1
-
-        return sequences
+        return self.extract_features(roi, frame_number, timestamp)
 
     def get_feature_dim(self) -> int:
         """Get output feature dimension."""
