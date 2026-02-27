@@ -1,11 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python.exe -m py_compile:*)",
-      "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(python run.py:*)",
-      "Bash(git log:*)",
-      "Bash(timeout:*)"
+      "Bash(du:*)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(python -c:*)",
+      "WebFetch(domain:docs.ultralytics.com)",
+      "Bash(find C:/Users/MSI/Music/Project_DigitalWitness/data -name \".gitkeep\" -delete)"
     ]
   }
 }

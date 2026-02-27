@@ -29,27 +29,23 @@ data/training/shoplifting/*.mp4
 data/videos/*.mp4
 data/videos/*.avi
 
-# Model files (large - download separately or use Git LFS)
+# Model files (large - download separately or train via notebook)
 models/*.pt
 models/*.pkl
+models/*.pth
 models/video_processing_log.json
+models/lstm_classifier_info.json
 
-# Training notebook outputs
-models/*.ipynb
-
-# Keep visualization PNGs for reference but they can be regenerated
-# models/*.png
+# YOLO training artifacts
+runs/
 
 # Output files (user-generated)
-outputs/cases/*.json
-outputs/clips/*.mp4
+outputs/
 
 # OS files
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Windows artifacts
 nul
 
 # Logs

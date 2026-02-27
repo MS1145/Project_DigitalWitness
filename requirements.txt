@@ -1,12 +1,10 @@
 # Core
 opencv-python-headless
-mediapipe
 numpy
 pandas
 matplotlib
 scikit-learn
 Pillow
-joblib
 
 # Web UI
 streamlit>=1.32.0
@@ -16,8 +14,7 @@ plotly
 # Deep Learning
 torch>=2.0.0
 torchvision>=0.15.0
-ultralytics>=8.0.0
-lapx
+ultralytics>=8.3.0
 
 # Reports
 reportlab>=4.0.0
