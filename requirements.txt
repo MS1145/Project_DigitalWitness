@@ -15,6 +15,7 @@ plotly
 torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.3.0
+lapx>=0.5.2
 
 # Reports
 reportlab>=4.0.0

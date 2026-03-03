@@ -6,7 +6,8 @@
       "WebSearch",
       "Bash(python -c:*)",
       "WebFetch(domain:docs.ultralytics.com)",
-      "Bash(find C:/Users/MSI/Music/Project_DigitalWitness/data -name \".gitkeep\" -delete)"
+      "Bash(find C:/Users/MSI/Music/Project_DigitalWitness/data -name \".gitkeep\" -delete)",
+      "Bash(.venv/Scripts/pip show reportlab)"
     ]
   }
 }
