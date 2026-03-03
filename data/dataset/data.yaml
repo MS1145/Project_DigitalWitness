@@ -1,0 +1,13 @@
+path: data/dataset     # relative to project root (where notebook runs)
+train: train/images
+val:   train/images    # placeholder — replace with valid/images once you have a val split
+
+nc: 24
+names: ['backpack-or-handbag', 'carrying-item', 'empty-basket', 'empty-shopping-bags', 'empty-trolly', 'filled-basket', 'filled-shopping-bags', 'filled-trolly', 'occupied-checkout-counter', 'person', 'person with carrying item-s- and shopping bag-s-', 'person-with-backpack-handbag', 'person-with-backpack-handbag-and-carrying-item-s-', 'person-with-backpack-handbag-and-shopping-bag-s-', 'person-with-basket-trolly-and-backpack-handbag', 'person-with-basket-trolly-and-carrying-item', 'person-with-basket-trolly-and-shopping-bag', 'person-with-basket-trolly-shopping-bag-s-and-backpack-handbag', 'person-with-carrying-item', 'person-with-empty-basket-trolly', 'person-with-empty-shopping-bag-s-', 'person-with-filled-basket-trolly', 'person-with-filled-shopping-bag-s-', 'vacant-checkout-counter']
+
+roboflow:
+  workspace: shoplifting-annotation-data
+  project: shoplifting-annotation
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/shoplifting-annotation-data/shoplifting-annotation/dataset/2
