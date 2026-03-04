@@ -23,6 +23,9 @@ __pycache__/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
+# Dataset (large — download from Roboflow separately)
+data/dataset/
+
 # YOLO training artifacts
 runs/
 
