@@ -23,11 +23,8 @@ __pycache__/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Training data (large video files - download separately)
-data/training/normal/*.mp4
-data/training/shoplifting/*.mp4
-data/videos/*.mp4
-data/videos/*.avi
+# Data folder (large files - do not commit)
+data/
 
 # Model files (large - download separately or train via notebook)
 models/*.pt
