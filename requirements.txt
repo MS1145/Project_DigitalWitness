@@ -1,20 +1,31 @@
-# Core
-opencv-python-headless
-numpy
-pandas
-matplotlib
-scikit-learn
-Pillow
+# ============================================================
+# Digital Witness — Python Dependencies
+# Python 3.10, 3.11, or 3.12 required
+#
+# DO NOT run this directly with pip install -r
+# Instead run:  setup.bat
+# It auto-detects your GPU and installs the correct PyTorch.
+# ============================================================
 
-# Web UI
+# --- Core ---
+opencv-python>=4.8.0
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+scikit-learn>=1.3.0
+Pillow>=10.0.0
+scipy>=1.11.0
+tqdm>=4.65.0
+pyyaml>=6.0
+
+# --- Web UI ---
 streamlit>=1.32.0
 altair>=5.0.0,<6.0.0
-plotly
+plotly>=5.15.0
 
-# Deep Learning
-torch>=2.0.0
-torchvision>=0.15.0
+# --- Deep Learning (torch installed separately by setup.bat) ---
 ultralytics>=8.3.0
+lapx>=0.5.2
 
-# Reports
+# --- Reports ---
 reportlab>=4.0.0
