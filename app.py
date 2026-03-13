@@ -28,13 +28,14 @@ MODELS_DIR = ROOT_DIR / "models"
 DATA_DIR   = ROOT_DIR / "data"
 
 YOLO26_PATH     = MODELS_DIR / "yolo26_retail.pt"
-YOLO26_BASE     = MODELS_DIR / "yolo26n.pt"          # fallback if not fine-tuned
+YOLO26_BASE     = MODELS_DIR / "yolo26n.pt"          # COCO base — reliable person detection
+YOLO26_DW_V2    = MODELS_DIR / "yolo26_dw_v2.pt"     # domain-adaptive fine-tune (Option 1)
 MOBILENET_PATH  = MODELS_DIR / "mobilenet_extractor.pt"
 LSTM_PATH       = MODELS_DIR / "bilstm_dw.pt"
 LSTM_INFO_PATH  = MODELS_DIR / "bilstm_dw_info.json"
 
 BEHAVIOR_CLASSES = ["normal", "shoplifting"]
-YOLO_CONF        = 0.3
+YOLO_CONF        = 0.2
 YOLO_IOU         = 0.45
 MOBILENET_DIM    = 1280   # raw MobileNetV2 output (no projection); matches bilstm_dw.pt
 LSTM_SEQ_LEN     = 30
@@ -190,13 +191,27 @@ def load_model_metrics():
     return None
 
 
+def load_mobilenet_metrics():
+    p = MODELS_DIR / "mobilenet_dw_info.json"
+    if p.exists():
+        with open(p, "r") as f:
+            return json.load(f)
+    return None
+
+
 def get_active_yolo_path():
-    """Return fine-tuned YOLO26 if available, else base yolo26n.pt."""
-    if YOLO26_PATH.exists():
-        return str(YOLO26_PATH)
+    """Model priority:
+    1. yolo26_dw_v2.pt  — domain-adaptive fine-tune (retail + surveillance frames)
+    2. yolo26n.pt       — COCO base, reliable person detection on any footage
+    3. yolo26_retail.pt — retail-only fine-tune, domain-shifted (fallback only)
+    """
+    if YOLO26_DW_V2.exists():
+        return str(YOLO26_DW_V2)
     if YOLO26_BASE.exists():
         return str(YOLO26_BASE)
-    return str(MODELS_DIR / "yolo26n.pt")  # ultralytics will attempt to download
+    if YOLO26_PATH.exists():
+        return str(YOLO26_PATH)
+    return str(MODELS_DIR / "yolo26n.pt")
 
 
 def get_product_catalog():
@@ -216,7 +231,8 @@ def get_product_catalog():
 
 # ─── Inline Pipeline ──────────────────────────────────────────────────────────
 
-def run_pipeline(video_path, progress_callback=None):
+def run_pipeline(video_path, progress_callback=None,
+                 visual_out_path=None, live_frame_callback=None):
     """
     Self-contained inference pipeline.
     YOLO26 detection → MobileNetV2 feature extraction → LSTM classification
@@ -260,8 +276,14 @@ def run_pipeline(video_path, progress_callback=None):
     ])
 
     PRODUCT_CLASSES = {
+        # COCO base model classes
         "bottle", "cup", "bowl", "banana", "apple", "sandwich",
         "backpack", "handbag", "book", "cell phone", "orange", "donut",
+        # Retail fine-tuned model classes
+        "backpack-or-handbag", "carrying-item",
+        "empty-basket", "filled-basket",
+        "empty-shopping-bags", "filled-shopping-bags",
+        "empty-trolly", "filled-trolly",
     }
 
     def _early_exit_normal(reason, f_num, f_total, fps, w, h):
@@ -321,9 +343,21 @@ def run_pipeline(video_path, progress_callback=None):
     frame_num    = 0
     feat_step    = 3   # extract CNN features every 3rd frame (speed)
 
-    # Probe window: scan first ~2 s then decide whether to continue
-    probe_frames = max(int(fps_val * 2), 30)   # at least 30 frames
+    # Probe window: scan first ~5 s then decide whether to continue
+    probe_frames = max(int(fps_val * 5), 60)   # at least 60 frames
     probe_done   = False
+
+    # ── Visual output setup ────────────────────────────────────────────────────
+    video_writer     = None
+    last_live_label  = None
+    last_live_conf   = 0.0
+    live_timeline    = []
+    _live_step       = 30       # update live preview every N frames
+    if visual_out_path:
+        _fourcc      = cv2.VideoWriter_fourcc(*"mp4v")
+        video_writer = cv2.VideoWriter(
+            visual_out_path, _fourcc, fps_val, (width, height)
+        )
 
     while True:
         ret, frame = cap.read()
@@ -351,17 +385,72 @@ def run_pipeline(video_path, progress_callback=None):
                     results.boxes.xyxy.cpu().numpy(),
                     results.boxes.cls, ids):
                 cls_name = yolo_model.names[int(cls_id)]
-                if cls_name == "person":
+                # Match "person", "person-with-*", "person with *" (retail model variants)
+                if cls_name == "person" or cls_name.startswith("person"):
                     persons_set.add(tid)
                     frame_person_boxes[tid] = box_t
                 elif cls_name in PRODUCT_CLASSES:
                     products_set.add(cls_name)
                     frame_product_boxes.append((cls_name, box_t))
 
+        # ── Frame annotation (visual output + live preview) ───────────────────
+        if video_writer or live_frame_callback:
+            ann = frame.copy()
+            # Draw YOLO bounding boxes
+            if results.boxes is not None:
+                for box_t, cls_id_v, conf_v in zip(
+                        results.boxes.xyxy.cpu().numpy(),
+                        results.boxes.cls.cpu().numpy(),
+                        results.boxes.conf.cpu().numpy()):
+                    x1, y1, x2, y2 = map(int, box_t)
+                    cn_v  = yolo_model.names[int(cls_id_v)]
+                    is_p  = cn_v == "person" or cn_v.startswith("person")
+                    col_v = (0, 200, 0) if is_p else (200, 120, 0)
+                    cv2.rectangle(ann, (x1, y1), (x2, y2), col_v, 2)
+                    lbl_v = f"{'Person' if is_p else cn_v} {conf_v:.0%}"
+                    cv2.putText(ann, lbl_v, (x1, max(y1 - 5, 12)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, col_v, 1, cv2.LINE_AA)
+            # Draw classification badge (last known BiLSTM verdict)
+            if last_live_label:
+                b_col = (0, 50, 200) if last_live_label == "shoplifting" else (20, 140, 20)
+                b_txt = f"{last_live_label.upper()}  {last_live_conf:.0%}"
+                (tw_b, th_b), _ = cv2.getTextSize(b_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+                cv2.rectangle(ann, (8, 8), (tw_b + 18, th_b + 22), b_col, -1)
+                cv2.putText(ann, b_txt, (12, th_b + 16),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+            # Stats overlay top-right
+            _sw, _sh = ann.shape[1], ann.shape[0]
+            stats_txt = f"Persons: {len(persons_set)}  |  Products: {len(products_set)}"
+            (stw, sth), _ = cv2.getTextSize(stats_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(ann, (_sw - stw - 14, 8), (_sw - 4, sth + 22), (40, 40, 40), -1)
+            cv2.putText(ann, stats_txt, (_sw - stw - 10, sth + 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
+            # Frame counter bottom-left
+            cv2.putText(ann, f"{frame_num}/{total_f}", (8, _sh - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
+            # Write to VideoWriter
+            if video_writer:
+                video_writer.write(ann)
+            # Live callback every _live_step frames
+            if live_frame_callback and frame_num % _live_step == 0:
+                ann_rgb = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
+                tl_color = ("red"  if last_live_label == "shoplifting" else
+                             "green" if last_live_label == "normal" else "gray")
+                live_timeline.append(tl_color)
+                live_frame_callback(ann_rgb, frame_num, total_f, {
+                    "persons_tracked"  : len(persons_set),
+                    "products_detected": len(products_set),
+                    "label"            : last_live_label or "Analyzing...",
+                    "conf"             : last_live_conf,
+                    "timeline"         : list(live_timeline),
+                })
+
         # ── Edge case: probe window elapsed — exit early if no person found ──
         if not probe_done and frame_num >= probe_frames:
             probe_done = True
             if not persons_set:
+                if video_writer:
+                    video_writer.release()
                 cap.release()
                 _cb(1.0, "No persons detected — returning normal.")
                 return _early_exit_normal(
@@ -390,7 +479,20 @@ def run_pipeline(video_path, progress_callback=None):
             x    = xform(rgb).unsqueeze(0).to(dev)
             feat = combined_model.extract_cnn_feat(x).cpu().numpy().flatten()
             all_feats.append(feat)
+            # Rolling BiLSTM for live badge — run once every LSTM_STRIDE features
+            if (video_writer or live_frame_callback) and \
+                    len(all_feats) >= LSTM_SEQ_LEN and \
+                    (len(all_feats) - LSTM_SEQ_LEN) % max(LSTM_STRIDE // 2, 1) == 0:
+                with torch.no_grad():
+                    _seq_np = np.array(all_feats[-LSTM_SEQ_LEN:])
+                    _xt     = torch.FloatTensor(_seq_np[np.newaxis]).to(dev)
+                    _log, _ = combined_model(_xt)
+                    _prb    = torch.softmax(_log, dim=1).cpu().numpy()[0]
+                last_live_label = lstm_classes[int(np.argmax(_prb))]
+                last_live_conf  = float(np.max(_prb))
 
+    if video_writer:
+        video_writer.release()
     cap.release()
     duration = frame_num / fps_val
 
@@ -577,6 +679,7 @@ def run_pipeline(video_path, progress_callback=None):
         },
         "alert": alert,
         "model_trained": LSTM_PATH.exists(),
+        "annotated_video_path": visual_out_path,
     }
 
 
@@ -662,8 +765,14 @@ def render_sidebar():
             st.warning("LSTM Model: Not trained")
             st.info("Train in Colab with **DigitalWitness_Pipeline.ipynb**, then place `bilstm_dw.pt` in `models/`")
 
-        yolo_status = "yolo26_retail.pt ✓" if YOLO26_PATH.exists() else \
-                      "yolo26n.pt (base) ✓" if YOLO26_BASE.exists() else "Not found"
+        if YOLO26_DW_V2.exists():
+            yolo_status = "yolo26_dw_v2.pt ✓ (domain-adaptive)"
+        elif YOLO26_BASE.exists():
+            yolo_status = "yolo26n.pt ✓ (COCO base)"
+        elif YOLO26_PATH.exists():
+            yolo_status = "yolo26_retail.pt ✓ (retail only)"
+        else:
+            yolo_status = "Not found"
         bilstm_status = "bilstm_dw.pt ✓" if LSTM_PATH.exists() else "Not found"
 
         st.markdown("---")
@@ -682,136 +791,150 @@ def render_sidebar():
 
 
 def render_model_performance_tab():
-    metrics = load_model_metrics()
+    bilstm_info   = load_model_metrics()
+    mobilenet_info = load_mobilenet_metrics()
 
-    if not metrics:
-        st.warning("No model metrics found. Train the model first using the Colab notebook.")
-        st.markdown("---")
-        st.markdown("### Training Instructions")
-        st.markdown("""
-        1. Open **DigitalWitness_Pipeline.ipynb** in Google Colab
-        2. Upload `yolo26n.pt` to `Drive/DigitalWitness/`
-        3. Add training videos to `Drive/DigitalWitness/dataset/videos/`
-        4. Run all cells (Cell 3 → YOLO26, Cell 4 → MobileNetV2, Cell 5 → LSTM)
-        5. Download `models/bilstm_dw.pt` and `models/bilstm_dw_info.json`
-        6. Place them in `models/` directory here
-        """)
+    if not bilstm_info and not mobilenet_info:
+        st.warning("No model metrics found. Train the models first using the notebook.")
         return
 
     st.markdown('<div class="section-header">Deep Learning Model Performance</div>',
                 unsafe_allow_html=True)
 
-    # Support bilstm_dw_info.json fields (best_val_acc, seq_len, hidden, layers)
-    # as well as richer info files with training_date, n_train_samples, etc.
-    best_val = metrics.get("final_val_acc",
-               metrics.get("best_val_acc",
-               metrics.get("metrics", {}).get("accuracy", 0)))
+    # ── MobileNetV2 evaluation metrics (computed on held-out val set) ──────────
+    mn   = mobilenet_info or {}
+    mn_m = mn.get("metrics", {})
+    st.markdown("### MobileNetV2 Frame Classifier — Evaluation Results")
+    st.caption(f"Evaluated on {mn.get('n_val_samples', 0):,} held-out validation frames (20% stratified split)")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Accuracy",  f"{mn_m.get('accuracy',  mn.get('best_val_acc', 0)):.2%}")
+    c2.metric("Precision", f"{mn_m.get('precision', 0):.2%}")
+    c3.metric("Recall",    f"{mn_m.get('recall',    0):.2%}")
+    c4.metric("F1 Score",  f"{mn_m.get('f1_score',  0):.2%}")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        date_str = metrics.get("training_date", "N/A")
-        st.metric("Training Date", date_str[:10] if isinstance(date_str, str) and len(date_str) >= 10 else date_str)
-    with c2:
-        n_train = metrics.get("n_train_samples", 0)
-        st.metric("Train Samples", f"{n_train:,}" if n_train else "N/A")
-    with c3:
-        n_val = metrics.get("n_val_samples", 0)
-        st.metric("Val Samples", f"{n_val:,}" if n_val else "N/A")
+    per_class = mn.get("per_class_metrics", {})
+    if per_class:
+        st.markdown("#### Per-Class Metrics")
+        classes = mn.get("classes", ["normal", "shoplifting"])
+        rows = [{"Class"    : c.capitalize(),
+                 "Precision": f"{per_class.get('precision', {}).get(c, 0):.2%}",
+                 "Recall"   : f"{per_class.get('recall',    {}).get(c, 0):.2%}",
+                 "F1 Score" : f"{per_class.get('f1',        {}).get(c, 0):.2%}",
+                 "Support"  : per_class.get('support', {}).get(c, 0)}
+                for c in classes]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+    # ── BiLSTM val accuracy ────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### Classification Metrics")
-    detailed = metrics.get("metrics", {})
-    if detailed:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Accuracy",  f"{detailed.get('accuracy', 0):.1%}")
-        c2.metric("Precision", f"{detailed.get('precision', 0):.1%}")
-        c3.metric("Recall",    f"{detailed.get('recall', 0):.1%}")
-        c4.metric("F1 Score",  f"{detailed.get('f1_score', 0):.1%}")
-    else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Best Val Accuracy", f"{best_val:.1%}")
-        c2.metric("Sequence Length",   str(metrics.get("seq_len", LSTM_SEQ_LEN)))
-        c3.metric("Hidden Units",      str(metrics.get("hidden", 256)))
-
+    st.markdown("### BiLSTM + Attention Sequence Classifier — Validation Accuracy")
+    st.caption("Best validation accuracy recorded during training (frame-sequence level)")
+    if bilstm_info:
+        lstm_acc = bilstm_info.get("best_val_acc", 0)
+        c1, c2 = st.columns(2)
+        c1.metric("Best Validation Accuracy", f"{lstm_acc:.2%}")
+        c2.metric("Val Sequences", bilstm_info.get("n_val_samples", "N/A"))
+    # ── Confusion matrix + learning curve ─────────────────────────────────────
     st.markdown("---")
-    col1, col2 = st.columns(2)
+    _cm_path  = ROOT_DIR / "outputs" / "confusion_matrix.png"
+    _lc_path  = ROOT_DIR / "outputs" / "learning_curve.png"
+    has_cm = _cm_path.exists()
+    has_lc = _lc_path.exists()
 
-    with col1:
-        st.markdown("### Model Architecture")
-        st.markdown("""
-        **Detection: YOLO26** (Jan 2026)
-        - NMS-free, 43% faster than YOLOv8
-        - Fine-tuned on retail annotations
-        - ByteTrack multi-object tracking
-
-        **Feature Extraction: MobileNetV2**
-        - ImageNet pretrained weights
-        - Last 3 residual blocks fine-tuned
-        - 1280-dim feature output (raw backbone, no projection)
-
-        **Temporal Classification: Bidirectional LSTM**
-        - 256 hidden units, 2 layers
-        - Attention mechanism
-        - 2-class: normal / shoplifting
-        """)
-
-    with col2:
+    if has_cm and has_lc:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### Confusion Matrix")
+            st.image(str(_cm_path), use_container_width=True)
+        with col2:
+            st.markdown("### Training Learning Curve")
+            st.image(str(_lc_path), use_container_width=True)
+    elif has_cm:
         st.markdown("### Confusion Matrix")
-        _cm_img_path = ROOT_DIR / "outputs" / "confusion_matrix.png"
+        st.image(str(_cm_path), use_container_width=True)
+    elif has_lc:
+        st.markdown("### Training Learning Curve")
+        st.image(str(_lc_path), use_container_width=True)
+    elif "confusion_matrix" in (bilstm_info or {}):
         import plotly.graph_objects as go
-        if _cm_img_path.exists():
-            st.image(str(_cm_img_path), use_container_width=True)
-        elif "confusion_matrix" in metrics:
-            cm = np.array(metrics["confusion_matrix"])
-            classes = metrics.get("classes", ["normal", "shoplifting"])
-            fig = go.Figure(data=go.Heatmap(
-                z=cm, x=classes, y=classes, colorscale="Blues",
-                text=cm, texttemplate="%{text}", textfont={"size": 20},
-            ))
-            fig.update_layout(
-                title="Predicted vs Actual",
-                xaxis_title="Predicted", yaxis_title="True",
-                height=300, margin=dict(l=20, r=20, t=50, b=20)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Run notebook Cell 5 to generate the confusion matrix")
+        st.markdown("### Confusion Matrix")
+        cm = np.array(bilstm_info["confusion_matrix"])
+        classes = bilstm_info.get("classes", ["normal", "shoplifting"])
+        fig = go.Figure(data=go.Heatmap(
+            z=cm, x=classes, y=classes, colorscale="Blues",
+            text=cm, texttemplate="%{text}", textfont={"size": 20},
+        ))
+        fig.update_layout(
+            title="Predicted vs Actual",
+            xaxis_title="Predicted", yaxis_title="True",
+            height=350, margin=dict(l=20, r=20, t=50, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    per_class = metrics.get("per_class_metrics", {})
+    # ── Per-class metrics table ────────────────────────────────────────────────
+    per_class = (bilstm_info or {}).get("per_class_metrics", {})
     if per_class:
         st.markdown("---")
         st.markdown("### Per-Class Metrics")
-        classes = metrics.get("classes", ["normal", "shoplifting"])
+        classes = (bilstm_info or {}).get("classes", ["normal", "shoplifting"])
         rows = [{"Class": c.capitalize(),
                  "Precision": f"{per_class.get('precision', {}).get(c, 0):.1%}",
-                 "Recall"   : f"{per_class.get('recall', {}).get(c, 0):.1%}",
-                 "F1 Score" : f"{per_class.get('f1', {}).get(c, 0):.1%}"}
+                 "Recall"   : f"{per_class.get('recall',    {}).get(c, 0):.1%}",
+                 "F1 Score" : f"{per_class.get('f1',        {}).get(c, 0):.1%}"}
                 for c in classes]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # ── Model architecture & training config ──────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Model Architecture")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **Detection: YOLO26** (Jan 2026)
+        - NMS-free, 43% faster than YOLOv8
+        - Fine-tuned on retail product annotations
+        - ByteTrack multi-object tracking
+
+        **Feature Extraction: MobileNetV2**
+        - ImageNet pretrained, last 3 blocks fine-tuned
+        - 1280-dim feature output (no projection layer)
+        """)
+    with col2:
+        st.markdown("""
+        **Temporal Classification: Bidirectional LSTM**
+        - 256 hidden units, 2 layers, attention mechanism
+        - Sequence length: 30 frames, stride: 15
+        - 2-class output: normal / shoplifting
+
+        **XAI Layer**
+        - Attention weights → temporal explanation
+        - Intent score: 50% behaviour + 30% product + 20% duration
+        - Bias adjustment via video quality score
+        """)
 
     st.markdown("---")
     st.markdown("### Training Configuration")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("**LSTM**")
-        st.json({"input_dim": metrics.get("input_dim", 1280),
-                 "hidden": metrics.get("hidden", 256),
-                 "layers": metrics.get("layers", 2),
+        st.markdown("**BiLSTM**")
+        st.json({"input_dim": (bilstm_info or {}).get("input_dim", 1280),
+                 "hidden":    (bilstm_info or {}).get("hidden", 256),
+                 "layers":    (bilstm_info or {}).get("layers", 2),
                  "bidirectional": True, "dropout": 0.3,
-                 "seq_length": metrics.get("seq_len", 30)})
+                 "seq_length":    (bilstm_info or {}).get("seq_len", 30)})
     with c2:
         st.markdown("**MobileNetV2**")
         st.json({"backbone": "mobilenet_v2",
-                 "weights": "MobileNet_V2_Weights.DEFAULT",
+                 "weights":  "MobileNet_V2_Weights.DEFAULT",
                  "feature_dim": 1280,
-                 "unfrozen_blocks": "15-18"})
+                 "unfrozen_blocks": "features[16:]"})
     with c3:
         st.markdown("**Training**")
-        st.json({"epochs": metrics.get("epochs", 50),
-                 "batch_size": 16,
+        st.json({"batch_size":    16,
                  "lr_mobilenet": "1e-4",
-                 "lr_lstm": "1e-3",
-                 "optimizer": "Adam"})
+                 "lr_bilstm":    "1e-3",
+                 "optimizer":    "Adam",
+                 "scheduler":    "ReduceLROnPlateau",
+                 "early_stopping_patience": 10})
 
 
 def render_analysis_results(results):
@@ -1289,6 +1412,8 @@ def main():
         st.session_state.analysis_results = None
     if "pos_items" not in st.session_state:
         st.session_state.pos_items = []
+    if "annotated_video_path" not in st.session_state:
+        st.session_state.annotated_video_path = None
 
     render_header()
     render_sidebar()
@@ -1332,32 +1457,135 @@ def main():
                 tmp.write(uploaded.read())
                 video_path = tmp.name
 
-            st.markdown("### Processing")
-            prog = st.progress(0)
+            # Temp file for annotated output video
+            import uuid
+            ann_out_path = os.path.join(tempfile.gettempdir(),
+                                        f"dw_annotated_{uuid.uuid4().hex[:8]}.mp4")
+
+            st.markdown("### Live Analysis Preview")
+            st.caption("Watch the pipeline analyse your video — YOLO detections, "
+                       "classification badge, and stats update in real time.")
+
+            _col_frame, _col_stats = st.columns([3, 1])
+            with _col_frame:
+                _frame_ph = st.empty()
+                _frame_ph.markdown(
+                    "<div style='height:200px;display:flex;align-items:center;"
+                    "justify-content:center;background:#111;border-radius:8px;"
+                    "color:#666;font-size:0.9rem;'>Waiting for first frame...</div>",
+                    unsafe_allow_html=True,
+                )
+            with _col_stats:
+                _stat_ph = st.empty()
+
+            _timeline_ph = st.empty()
+            prog   = st.progress(0)
             status = st.empty()
 
             def on_progress(p, m):
                 prog.progress(min(p, 1.0))
                 status.text(m)
 
-            with st.spinner("Running deep learning analysis..."):
-                try:
-                    results = run_pipeline(video_path, progress_callback=on_progress)
-                    if results.get("success"):
-                        results["suspicious_frames"] = extract_suspicious_frames(
-                            video_path, results.get("behavior_events", []), max_frames=4
-                        )
-                except Exception as e:
-                    results = {"success": False, "error": str(e)}
+            def on_live_frame(frame_rgb, frame_idx, total_frames, stats):
+                _frame_ph.image(
+                    frame_rgb,
+                    caption=f"Frame {frame_idx} / {total_frames}",
+                    use_container_width=True,
+                )
+                label = stats.get("label", "Analyzing...")
+                conf  = stats.get("conf", 0.0)
+                col   = ("#dc3545" if label == "shoplifting" else
+                         "#28a745" if label == "normal" else "#aaaaaa")
+                _stat_ph.markdown(f"""
+                <div style='padding:1rem;background:#1a1a2e;border-radius:8px;
+                            border:1px solid #333;font-family:monospace;'>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>CLASSIFICATION</p>
+                    <p style='color:{col};font-size:1.15rem;font-weight:700;
+                               margin:0.25rem 0;'>{label.upper()}</p>
+                    <p style='color:#ccc;font-size:0.85rem;margin:0;'>
+                        {conf:.0%} confidence</p>
+                    <hr style='border-color:#333;margin:0.6rem 0;'>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>PERSONS TRACKED</p>
+                    <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
+                        {stats.get("persons_tracked", 0)}</p>
+                    <hr style='border-color:#333;margin:0.6rem 0;'>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>PRODUCTS DETECTED</p>
+                    <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
+                        {stats.get("products_detected", 0)}</p>
+                </div>""", unsafe_allow_html=True)
+
+                timeline = stats.get("timeline", [])
+                if timeline:
+                    pct = frame_idx / max(total_frames, 1)
+                    cmap = {"red": "#dc3545", "green": "#28a745", "gray": "#555"}
+                    bar  = ('<div style="display:flex;width:100%;height:10px;'
+                            'border-radius:4px;overflow:hidden;background:#333;">')
+                    for tc in timeline:
+                        w = 100.0 / max(len(timeline), 1)
+                        bar += (f'<div style="flex:{w:.2f};'
+                                f'background:{cmap.get(tc, "#555")};"></div>')
+                    bar += "</div>"
+                    _timeline_ph.markdown(f"""
+                    <div style='margin:0.4rem 0 0.8rem 0;'>
+                        <p style='color:#888;font-size:0.72rem;margin-bottom:4px;'>
+                            Timeline &nbsp;
+                            <span style='color:#28a745;'>■ Normal</span>&nbsp;
+                            <span style='color:#dc3545;'>■ Suspicious</span>&nbsp;
+                            <span style='color:#555;'>■ Analyzing</span>
+                        </p>
+                        {bar}
+                        <p style='color:#666;font-size:0.72rem;margin-top:4px;'>
+                            {pct:.0%} processed</p>
+                    </div>""", unsafe_allow_html=True)
+
+            try:
+                results = run_pipeline(
+                    video_path,
+                    progress_callback=on_progress,
+                    visual_out_path=ann_out_path,
+                    live_frame_callback=on_live_frame,
+                )
+                if results.get("success"):
+                    results["suspicious_frames"] = extract_suspicious_frames(
+                        video_path, results.get("behavior_events", []), max_frames=4
+                    )
+            except Exception as e:
+                results = {"success": False, "error": str(e)}
+
+            # Clear live preview widgets
+            _frame_ph.empty()
+            _stat_ph.empty()
+            _timeline_ph.empty()
+            prog.empty()
+            status.empty()
 
             if os.path.exists(video_path):
                 os.unlink(video_path)
 
-            st.session_state.analysis_results = results
-            prog.empty()
-            status.empty()
+            # Clean up old annotated video if present
+            old_ann = st.session_state.get("annotated_video_path")
+            if old_ann and old_ann != ann_out_path and os.path.exists(old_ann):
+                try:
+                    os.unlink(old_ann)
+                except OSError:
+                    pass
+
+            st.session_state.analysis_results   = results
+            st.session_state.annotated_video_path = ann_out_path
 
         if st.session_state.analysis_results:
+            # ── Annotated video player ──────────────────────────────────────
+            ann_vid = st.session_state.get("annotated_video_path")
+            if ann_vid and os.path.exists(ann_vid) and os.path.getsize(ann_vid) > 4096:
+                st.markdown("---")
+                st.markdown("### Annotated Analysis Video")
+                st.caption(
+                    "Replay with YOLO detections (green = person, orange = product), "
+                    "live BiLSTM classification badge, and per-frame stats."
+                )
+                with open(ann_vid, "rb") as _vf:
+                    st.video(_vf.read())
+
             st.markdown("---")
             render_analysis_results(st.session_state.analysis_results)
 
