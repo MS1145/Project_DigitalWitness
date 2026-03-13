@@ -30,13 +30,13 @@ DATA_DIR   = ROOT_DIR / "data"
 YOLO26_PATH     = MODELS_DIR / "yolo26_retail.pt"
 YOLO26_BASE     = MODELS_DIR / "yolo26n.pt"          # fallback if not fine-tuned
 MOBILENET_PATH  = MODELS_DIR / "mobilenet_extractor.pt"
-LSTM_PATH       = MODELS_DIR / "lstm_classifier.pt"
-LSTM_INFO_PATH  = MODELS_DIR / "lstm_classifier_info.json"
+LSTM_PATH       = MODELS_DIR / "bilstm_dw.pt"
+LSTM_INFO_PATH  = MODELS_DIR / "bilstm_dw_info.json"
 
 BEHAVIOR_CLASSES = ["normal", "shoplifting"]
 YOLO_CONF        = 0.3
 YOLO_IOU         = 0.45
-MOBILENET_DIM    = 512
+MOBILENET_DIM    = 1280   # raw MobileNetV2 output (no projection); matches bilstm_dw.pt
 LSTM_SEQ_LEN     = 30
 LSTM_STRIDE      = 15
 
@@ -106,70 +106,64 @@ def _get_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _build_lstm_model(input_dim, hidden_dim, num_layers, num_classes, dropout, bidirectional):
-    """Build LSTM model with attention (same architecture as notebook Cell 5)."""
-    import torch.nn as nn
+def _build_combined_model(num_classes=2, hidden=256, layers=2, dropout=0.3):
+    """
+    CNNBiLSTMAttention — matches exact bilstm_dw.pt architecture from notebook.
+
+    State dict key layout:
+      cnn.*            → MobileNetV2 features (layers 0-18), 1280-dim output
+      bilstm.*         → Bidirectional LSTM
+      attention.attn.* → Additive attention scorer (Linear → scalar)
+      classifier.*     → LayerNorm → Dropout → Linear(512,128) → ReLU → Linear(128,nc)
+
+    During inference the model receives pre-extracted 1280-dim feature sequences
+    (B, T, 1280); the cnn sub-module is only used for live frame extraction.
+    """
     import torch
-
-    class _Model(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.lstm = nn.LSTM(
-                input_size=input_dim, hidden_size=hidden_dim,
-                num_layers=num_layers, batch_first=True,
-                dropout=dropout if num_layers > 1 else 0,
-                bidirectional=bidirectional
-            )
-            attn_dim = hidden_dim * 2 if bidirectional else hidden_dim
-            self.attention = nn.Sequential(
-                nn.Linear(attn_dim, attn_dim // 2), nn.Tanh(),
-                nn.Linear(attn_dim // 2, 1)
-            )
-            self.classifier = nn.Sequential(
-                nn.Dropout(dropout), nn.Linear(attn_dim, hidden_dim),
-                nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, num_classes)
-            )
-
-        def forward(self, x):
-            lstm_out, _ = self.lstm(x)
-            attn = torch.softmax(self.attention(lstm_out), dim=1)
-            context = torch.sum(attn * lstm_out, dim=1)
-            return self.classifier(context), attn.squeeze(-1)
-
-    return _Model()
-
-
-def _build_mobilenet_extractor(feature_dim=512):
-    """
-    Build MobileNetV2 feature extractor with fixed bugs:
-    - weights=MobileNet_V2_Weights.DEFAULT (not deprecated pretrained=True)
-    - model.features used directly (not children()[:-1])
-    - AdaptiveAvgPool2d before Linear (fixes 62720 ≠ 1280 size mismatch)
-    """
     import torch.nn as nn
     from torchvision import models
     from torchvision.models import MobileNet_V2_Weights
 
-    mobilenet = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
+    class _Attention(nn.Module):
+        def __init__(self, dim):
+            super().__init__()
+            self.attn = nn.Linear(dim, 1)
 
-    class _Extractor(nn.Module):
+        def forward(self, x):          # x: (B, T, dim)
+            w = torch.softmax(self.attn(x), dim=1)   # (B, T, 1)
+            return (w * x).sum(1), w.squeeze(-1)      # (B, dim), (B, T)
+
+    class _Model(nn.Module):
         def __init__(self):
             super().__init__()
-            self.features   = mobilenet.features
-            self.pool       = nn.AdaptiveAvgPool2d((1, 1))
-            self.projection = nn.Sequential(
-                nn.Flatten(),
-                nn.Linear(1280, feature_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(0.3)
+            mn = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
+            self.cnn = mn.features                    # keys cnn.0.* … cnn.18.*
+            self.bilstm = nn.LSTM(
+                input_size=1280, hidden_size=hidden,
+                num_layers=layers, batch_first=True,
+                bidirectional=True,
+                dropout=dropout if layers > 1 else 0,
+            )
+            self.attention = _Attention(hidden * 2)   # key: attention.attn.*
+            self.classifier = nn.Sequential(
+                nn.LayerNorm(hidden * 2),             # classifier.0
+                nn.Dropout(dropout),                  # classifier.1 (no params)
+                nn.Linear(hidden * 2, 128),           # classifier.2
+                nn.ReLU(),                            # classifier.3 (no params)
+                nn.Linear(128, num_classes),          # classifier.4
             )
 
-        def forward(self, x):
-            x = self.features(x)
-            x = self.pool(x)
-            return self.projection(x)
+        def extract_cnn_feat(self, frame_tensor):
+            """Extract 1280-dim feature from a single (1,3,224,224) tensor."""
+            with torch.no_grad():
+                return self.cnn(frame_tensor).mean([-2, -1])  # (1, 1280)
 
-    return _Extractor()
+        def forward(self, x):          # x: (B, T, 1280) pre-extracted features
+            out, _ = self.bilstm(x)
+            ctx, attn = self.attention(out)
+            return self.classifier(ctx), attn
+
+    return _Model()
 
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -234,38 +228,16 @@ def run_pipeline(video_path, progress_callback=None):
     yolo_path  = get_active_yolo_path()
     yolo_model = YOLO(yolo_path)
 
-    # ── Load MobileNetV2 feature extractor ──
-    feat_model = _build_mobilenet_extractor(MOBILENET_DIM)
-    if MOBILENET_PATH.exists():
-        feat_model.load_state_dict(
-            torch.load(MOBILENET_PATH, map_location=dev, weights_only=True)
-        )
-    feat_model = feat_model.to(dev)
-    feat_model.eval()
-
-    # ── Load LSTM classifier ──
+    # ── Load combined CNNBiLSTMAttention model (bilstm_dw.pt) ──
     lstm_classes = BEHAVIOR_CLASSES
-    lstm_model   = None
+    combined_model = _build_combined_model(
+        num_classes=len(lstm_classes), hidden=256, layers=2, dropout=0.3
+    ).to(dev)
     if LSTM_PATH.exists():
-        ckpt = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
-        cfg  = ckpt.get("config", {})
-        lstm_classes = cfg.get("classes", BEHAVIOR_CLASSES)
-        lstm_model = _build_lstm_model(
-            input_dim=cfg.get("input_dim", MOBILENET_DIM),
-            hidden_dim=cfg.get("hidden_dim", 256),
-            num_layers=cfg.get("num_layers", 2),
-            num_classes=len(lstm_classes),
-            dropout=0.3,
-            bidirectional=True,
-        ).to(dev)
-        lstm_model.load_state_dict(ckpt["state_dict"])
-        lstm_model.eval()
-    else:
-        # Untrained model — results will be random, flagged in UI
-        lstm_model = _build_lstm_model(
-            MOBILENET_DIM, 256, 2, len(lstm_classes), 0.3, True
-        ).to(dev)
-        lstm_model.eval()
+        state_dict = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
+        combined_model.load_state_dict(state_dict)
+    # If not found: model keeps random ImageNet+random LSTM weights — flagged in UI
+    combined_model.eval()
 
     # ── Image preprocessing transform ──
     xform = transforms.Compose([
@@ -281,58 +253,161 @@ def run_pipeline(video_path, progress_callback=None):
         "backpack", "handbag", "book", "cell phone", "orange", "donut",
     }
 
+    def _early_exit_normal(reason, f_num, f_total, fps, w, h):
+        """Return a lightweight 'normal / no person' result without running BiLSTM."""
+        return {
+            "success"       : True,
+            "early_exit"    : True,
+            "early_exit_reason": reason,
+            "video_metadata": {
+                "filename"   : Path(video_path).name,
+                "duration"   : f_num / max(fps, 1),
+                "fps"        : fps,
+                "width"      : w,
+                "height"     : h,
+                "frame_count": f_total,
+            },
+            "lstm_detection": {
+                "classification": "normal",
+                "confidence"    : 1.0,
+                "is_shoplifting": False,
+            },
+            "detections": {
+                "persons_tracked"  : 0,
+                "products_detected": 0,
+                "interactions"     : 0,
+                "frames_processed" : f_num,
+            },
+            "product_pickups"  : {},
+            "behavior_events"  : [],
+            "intent_score"     : {"score": 0.0, "severity": "NONE",
+                                  "components": {}, "explanation": reason},
+            "quality_analysis" : {"reliability_score": 1.0,
+                                  "detection_rate": 1.0, "usable": True},
+            "bias_report"      : {"overall_fairness_score": 1.0,
+                                  "analysis_reliable": True,
+                                  "requires_review": False, "flags": []},
+            "alert"            : None,
+            "model_trained"    : LSTM_PATH.exists(),
+        }
+
     # ── Video processing ──
     _cb(0.05, "Opening video...")
-    cap         = cv2.VideoCapture(video_path)
-    fps_val     = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_f     = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    all_feats   = []
-    persons_set = set()
-    products_set = set()
-    frame_num   = 0
-    frame_step  = 3   # sample every 3rd frame for speed on CPU
+    cap          = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return {"success": False, "error": "Could not open video file."}
+
+    fps_val      = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_f      = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    all_feats    = []
+    persons_set  = set()   # unique track IDs
+    products_set = set()   # unique product class names seen
+    # product pickup: set of (person_track_id, product_class) — one entry per
+    # unique person×product pair that were in close proximity
+    product_pickup_events = set()
+    frame_num    = 0
+    feat_step    = 3   # extract CNN features every 3rd frame (speed)
+
+    # Probe window: scan first ~2 s then decide whether to continue
+    probe_frames = max(int(fps_val * 2), 30)   # at least 30 frames
+    probe_done   = False
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         frame_num += 1
-        if frame_num % frame_step != 0:
-            continue
 
         if progress_callback and frame_num % 90 == 0:
             pct = min(0.05 + (frame_num / max(total_f, 1)) * 0.65, 0.70)
             _cb(pct, f"Processing frame {frame_num}/{total_f}...")
 
-        # YOLO26 detection + ByteTrack
+        # ── YOLO26 detection + ByteTrack (EVERY frame → accurate track IDs) ──
         results = yolo_model.track(
             frame, conf=YOLO_CONF, iou=YOLO_IOU, persist=True, verbose=False
         )[0]
+
+        frame_person_boxes  = {}   # {track_id: [x1,y1,x2,y2]}
+        frame_product_boxes = []   # [(class_name, [x1,y1,x2,y2])]
+
         if results.boxes is not None:
             ids = (results.boxes.id.int().tolist()
-                   if results.boxes.id is not None else [-1] * len(results.boxes))
-            for cls_id, tid in zip(results.boxes.cls, ids):
+                   if results.boxes.id is not None
+                   else list(range(-len(results.boxes.cls), 0)))
+            for box_t, cls_id, tid in zip(
+                    results.boxes.xyxy.cpu().numpy(),
+                    results.boxes.cls, ids):
                 cls_name = yolo_model.names[int(cls_id)]
                 if cls_name == "person":
                     persons_set.add(tid)
+                    frame_person_boxes[tid] = box_t
                 elif cls_name in PRODUCT_CLASSES:
                     products_set.add(cls_name)
+                    frame_product_boxes.append((cls_name, box_t))
 
-        # MobileNetV2 feature extraction
-        rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        x    = xform(rgb).unsqueeze(0).to(dev)
-        with torch.no_grad():
-            feat = feat_model(x).cpu().numpy().flatten()
-        all_feats.append(feat)
+        # ── Edge case: probe window elapsed — exit early if no person found ──
+        if not probe_done and frame_num >= probe_frames:
+            probe_done = True
+            if not persons_set:
+                cap.release()
+                _cb(1.0, "No persons detected — returning normal.")
+                return _early_exit_normal(
+                    f"No person detected in the first {frame_num} frames "
+                    f"({frame_num/fps_val:.1f} s). Classified as normal.",
+                    frame_num, total_f, fps_val, width, height,
+                )
+
+        # ── Person-product proximity → detect pickups ──
+        for pid, pbox in frame_person_boxes.items():
+            px1, py1, px2, py2 = pbox
+            ph   = max(py2 - py1, 1)          # person height as proximity scale
+            pcx  = (px1 + px2) / 2
+            pcy  = (py1 + py2) / 2
+            for cls_name, prod_box in frame_product_boxes:
+                qx1, qy1, qx2, qy2 = prod_box
+                qcx = (qx1 + qx2) / 2
+                qcy = (qy1 + qy2) / 2
+                dist = ((pcx - qcx) ** 2 + (pcy - qcy) ** 2) ** 0.5
+                if dist < ph * 1.2:   # within 1.2× person height ≈ arm's reach
+                    product_pickup_events.add((pid, cls_name))
+
+        # ── CNN feature extraction (every feat_step frames for speed) ──
+        if frame_num % feat_step == 0:
+            rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            x    = xform(rgb).unsqueeze(0).to(dev)
+            feat = combined_model.extract_cnn_feat(x).cpu().numpy().flatten()
+            all_feats.append(feat)
 
     cap.release()
     duration = frame_num / fps_val
 
+    # ── Edge case: no persons in entire video ──
+    if not persons_set:
+        _cb(1.0, "No persons detected — returning normal.")
+        return _early_exit_normal(
+            "No person detected across the entire video. Classified as normal.",
+            frame_num, total_f, fps_val, width, height,
+        )
+
+    # ── Edge case: video too short — no features collected ──
+    if not all_feats:
+        _cb(1.0, "Video too short to analyse — returning normal.")
+        return _early_exit_normal(
+            f"Video too short ({frame_num} frame(s)) — insufficient data for "
+            "temporal classification. Classified as normal.",
+            frame_num, total_f, fps_val, width, height,
+        )
+
+    # Aggregate product pickup counts: how many distinct persons handled each product
+    product_pickups = {}
+    for (pid, cls_name) in product_pickup_events:
+        product_pickups[cls_name] = product_pickups.get(cls_name, 0) + 1
+
     _cb(0.72, "Running LSTM temporal classification...")
 
-    # ── Sliding-window LSTM classification ──
+    # ── Sliding-window BiLSTM classification ──
     feats_arr   = np.array(all_feats) if all_feats else np.zeros((1, MOBILENET_DIM))
     predictions = []
 
@@ -341,7 +416,7 @@ def run_pipeline(video_path, progress_callback=None):
         seq = np.vstack([feats_arr, pad])
         x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
         with torch.no_grad():
-            logits, _ = lstm_model(x_t)
+            logits, _ = combined_model(x_t)
             probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
         scale = len(all_feats) / LSTM_SEQ_LEN
         predictions.append({
@@ -356,7 +431,7 @@ def run_pipeline(video_path, progress_callback=None):
             seq = feats_arr[start:start + LSTM_SEQ_LEN]
             x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
             with torch.no_grad():
-                logits, _ = lstm_model(x_t)
+                logits, _ = combined_model(x_t)
                 probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
             predictions.append({
                 "start"        : start / fps_val,
@@ -465,6 +540,7 @@ def run_pipeline(video_path, progress_callback=None):
             "interactions"     : len(susp_e),
             "frames_processed" : len(all_feats),
         },
+        "product_pickups": product_pickups,   # {class_name: n_persons_who_handled_it}
         "behavior_events": behavior_events,
         "intent_score": {
             "score"      : adj_score,
@@ -548,8 +624,8 @@ def render_sidebar():
         **Pipeline:**
         1. **YOLO26 Detection** — Jan 2026 model, NMS-free, 43% faster than YOLOv8.
            Identifies and tracks people & products.
-        2. **MobileNetV2 Features** — Extracts 512-dim spatial features per frame
-           (1280→512 projection, ImageNet pretrained).
+        2. **MobileNetV2 Features** — Extracts 1280-dim spatial features per frame
+           (fine-tuned backbone, ImageNet pretrained).
         3. **Bidirectional LSTM + Attention** — Classifies temporal sequences of features
            into normal / shoplifting.
 
@@ -565,22 +641,27 @@ def render_sidebar():
             metrics = load_model_metrics()
             if metrics:
                 acc = metrics.get("final_val_acc",
-                      metrics.get("metrics", {}).get("accuracy", 0))
+                      metrics.get("best_val_acc",
+                      metrics.get("metrics", {}).get("accuracy", 0)))
                 st.metric("Validation Accuracy", f"{acc:.1%}")
                 if "metrics" in metrics:
                     m = metrics["metrics"]
                     st.metric("F1 Score", f"{m.get('f1_score', 0):.1%}")
         else:
             st.warning("LSTM Model: Not trained")
-            st.info("Train in Colab with **DigitalWitness_Pipeline.ipynb**, then place `lstm_classifier.pt` in `models/`")
+            st.info("Train in Colab with **DigitalWitness_Pipeline.ipynb**, then place `bilstm_dw.pt` in `models/`")
 
         yolo_status = "yolo26_retail.pt ✓" if YOLO26_PATH.exists() else \
                       "yolo26n.pt (base) ✓" if YOLO26_BASE.exists() else "Not found"
-        mb_status = "mobilenet_extractor.pt ✓" if MOBILENET_PATH.exists() else "Not fine-tuned (using ImageNet weights)"
+        bilstm_status = "bilstm_dw.pt ✓" if LSTM_PATH.exists() else "Not found"
 
         st.markdown("---")
         st.markdown("### Model Files")
-        st.code(f"YOLO26 : {yolo_status}\nMobileNetV2: {mb_status}", language=None)
+        st.code(
+            f"YOLO26    : {yolo_status}\n"
+            f"BiLSTM    : {bilstm_status}",
+            language=None
+        )
 
         st.markdown("---")
         st.markdown("### Important Notice")
@@ -601,7 +682,7 @@ def render_model_performance_tab():
         2. Upload `yolo26n.pt` to `Drive/DigitalWitness/`
         3. Add training videos to `Drive/DigitalWitness/dataset/videos/`
         4. Run all cells (Cell 3 → YOLO26, Cell 4 → MobileNetV2, Cell 5 → LSTM)
-        5. Download `models/lstm_classifier.pt` and `models/lstm_classifier_info.json`
+        5. Download `models/bilstm_dw.pt` and `models/bilstm_dw_info.json`
         6. Place them in `models/` directory here
         """)
         return
@@ -609,14 +690,22 @@ def render_model_performance_tab():
     st.markdown('<div class="section-header">Deep Learning Model Performance</div>',
                 unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    # Support bilstm_dw_info.json fields (best_val_acc, seq_len, hidden, layers)
+    # as well as richer info files with training_date, n_train_samples, etc.
+    best_val = metrics.get("final_val_acc",
+               metrics.get("best_val_acc",
+               metrics.get("metrics", {}).get("accuracy", 0)))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
         date_str = metrics.get("training_date", "N/A")
-        st.metric("Training Date", date_str[:10] if len(date_str) >= 10 else date_str)
-    with col2:
-        st.metric("Train Samples", f"{metrics.get('n_train_samples', 0):,}")
-    with col3:
-        st.metric("Val Samples",   f"{metrics.get('n_val_samples', 0):,}")
+        st.metric("Training Date", date_str[:10] if isinstance(date_str, str) and len(date_str) >= 10 else date_str)
+    with c2:
+        n_train = metrics.get("n_train_samples", 0)
+        st.metric("Train Samples", f"{n_train:,}" if n_train else "N/A")
+    with c3:
+        n_val = metrics.get("n_val_samples", 0)
+        st.metric("Val Samples", f"{n_val:,}" if n_val else "N/A")
 
     st.markdown("---")
     st.markdown("### Classification Metrics")
@@ -628,9 +717,10 @@ def render_model_performance_tab():
         c3.metric("Recall",    f"{detailed.get('recall', 0):.1%}")
         c4.metric("F1 Score",  f"{detailed.get('f1_score', 0):.1%}")
     else:
-        c1, c2 = st.columns(2)
-        c1.metric("Train Accuracy", f"{metrics.get('final_train_acc', 0):.1%}")
-        c2.metric("Val Accuracy",   f"{metrics.get('final_val_acc', 0):.1%}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Best Val Accuracy", f"{best_val:.1%}")
+        c2.metric("Sequence Length",   str(metrics.get("seq_len", LSTM_SEQ_LEN)))
+        c3.metric("Hidden Units",      str(metrics.get("hidden", 256)))
 
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -646,7 +736,7 @@ def render_model_performance_tab():
         **Feature Extraction: MobileNetV2**
         - ImageNet pretrained weights
         - Last 3 residual blocks fine-tuned
-        - 1280 → 512 dim projection
+        - 1280-dim feature output (raw backbone, no projection)
 
         **Temporal Classification: Bidirectional LSTM**
         - 256 hidden units, 2 layers
@@ -656,8 +746,11 @@ def render_model_performance_tab():
 
     with col2:
         st.markdown("### Confusion Matrix")
+        _cm_img_path = ROOT_DIR / "outputs" / "confusion_matrix.png"
         import plotly.graph_objects as go
-        if "confusion_matrix" in metrics:
+        if _cm_img_path.exists():
+            st.image(str(_cm_img_path), use_container_width=True)
+        elif "confusion_matrix" in metrics:
             cm = np.array(metrics["confusion_matrix"])
             classes = metrics.get("classes", ["normal", "shoplifting"])
             fig = go.Figure(data=go.Heatmap(
@@ -690,15 +783,16 @@ def render_model_performance_tab():
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**LSTM**")
-        st.json({"input_dim": metrics.get("input_dim", 512),
-                 "hidden": 256, "layers": 2,
+        st.json({"input_dim": metrics.get("input_dim", 1280),
+                 "hidden": metrics.get("hidden", 256),
+                 "layers": metrics.get("layers", 2),
                  "bidirectional": True, "dropout": 0.3,
-                 "seq_length": metrics.get("sequence_length", 30)})
+                 "seq_length": metrics.get("seq_len", 30)})
     with c2:
         st.markdown("**MobileNetV2**")
         st.json({"backbone": "mobilenet_v2",
                  "weights": "MobileNet_V2_Weights.DEFAULT",
-                 "feature_dim": 512,
+                 "feature_dim": 1280,
                  "unfrozen_blocks": "15-18"})
     with c3:
         st.markdown("**Training**")
@@ -715,6 +809,21 @@ def render_analysis_results(results):
         return
 
     import plotly.graph_objects as go
+
+    # ── Early-exit banner ──
+    if results.get("early_exit"):
+        st.markdown('<div class="section-header">Analysis Results</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class='alert-none'>
+            <h2 style='margin:0'>✓ NORMAL — No Persons Detected</h2>
+        </div>""", unsafe_allow_html=True)
+        st.info(f"⚡ **Fast exit:** {results['early_exit_reason']}")
+        vm = results.get("video_metadata", {})
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Frames Scanned", results["detections"]["frames_processed"])
+        c2.metric("Persons Detected", 0)
+        c3.metric("Duration", f"{vm.get('duration', 0):.1f}s")
+        return
 
     if not results.get("model_trained", True):
         st.error("**LSTM model not trained.** Results shown are RANDOM and should not be acted upon. "
@@ -790,8 +899,8 @@ def render_analysis_results(results):
         - YOLO26 (Jan 2026): NMS-free architecture, 43% faster than YOLOv8
 
         **Step 2: Feature Extraction (MobileNetV2)**
-        - Extracted 512-dim spatial features per frame
-        - Using model.features with AdaptiveAvgPool + 1280→512 projection
+        - Extracted 1280-dim spatial features per frame
+        - Raw backbone features (AdaptiveAvgPool, no projection head)
         - Last 3 inverted residual blocks fine-tuned on retail video
 
         **Step 3: Temporal Classification (Bidirectional LSTM)**
@@ -976,16 +1085,204 @@ def render_analysis_results(results):
         </div>""", unsafe_allow_html=True)
 
 
+# ─── YOLO class → readable product label mapping ──────────────────────────────
+YOLO_TO_PRODUCT = {
+    "bottle"    : "Bottle / Drink",
+    "cup"       : "Cup / Drink",
+    "bowl"      : "Bowl / Food",
+    "banana"    : "Banana",
+    "apple"     : "Apple",
+    "sandwich"  : "Sandwich / Food",
+    "backpack"  : "Backpack",
+    "handbag"   : "Handbag",
+    "book"      : "Book / Magazine",
+    "cell phone": "Mobile Phone",
+    "orange"    : "Orange / Fruit",
+    "donut"     : "Donut / Snack",
+}
+
+
+def render_pos_audit(analysis_results):
+    """
+    Mock POS terminal + mismatch audit.
+
+    Left panel  — Manual POS entry: user picks items + quantities as if they
+                  were the cashier entering a sale.
+    Right panel — Video evidence: products the camera detected being handled.
+    Bottom      — Mismatch table: flags items detected but not rung up, and
+                  items rung up but never seen in the footage.
+    """
+    st.markdown('<div class="section-header">Mock POS Terminal & Audit</div>',
+                unsafe_allow_html=True)
+    st.markdown("""
+    <div class="info-box">
+        Simulate a POS transaction then compare it against what the camera
+        detected. Mismatches between rung-up items and detected product
+        interactions are highlighted as potential theft indicators.
+    </div>""", unsafe_allow_html=True)
+
+    catalog = get_product_catalog()
+    cat_names = [p["name"] for p in catalog]
+    cat_by_name = {p["name"]: p for p in catalog}
+
+    col_pos, col_vid = st.columns(2)
+
+    # ── Left: POS Terminal ──────────────────────────────────────────────────
+    with col_pos:
+        st.markdown("### 🖥️ Mock POS Terminal")
+        st.caption("Enter items as they are being rung up at the checkout.")
+
+        with st.form("pos_form", clear_on_submit=False):
+            sel_name = st.selectbox("Select product", cat_names)
+            sel_qty  = st.number_input("Quantity", min_value=1, max_value=20, value=1)
+            add_btn  = st.form_submit_button("➕ Add to Transaction")
+
+        if add_btn:
+            item = dict(cat_by_name[sel_name])
+            item["qty"] = int(sel_qty)
+            st.session_state.pos_items.append(item)
+
+        if st.button("🗑️ Clear Transaction", key="clear_pos"):
+            st.session_state.pos_items = []
+
+        if st.session_state.pos_items:
+            st.markdown("#### Transaction Ledger")
+            rows = []
+            total = 0.0
+            for it in st.session_state.pos_items:
+                subtotal = it["price"] * it["qty"]
+                total   += subtotal
+                rows.append({
+                    "SKU"     : it["sku"],
+                    "Product" : it["name"],
+                    "Qty"     : it["qty"],
+                    "Unit £"  : f"£{it['price']:.2f}",
+                    "Subtotal": f"£{subtotal:.2f}",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.markdown(f"**Total: £{total:.2f}**")
+        else:
+            st.info("No items added yet.")
+
+    # ── Right: Video Evidence ────────────────────────────────────────────────
+    with col_vid:
+        st.markdown("### 📹 Video-Detected Products")
+        st.caption("Products the camera saw customers handling during the footage.")
+
+        pickups = analysis_results.get("product_pickups", {}) if analysis_results else {}
+        det     = analysis_results.get("detections", {})      if analysis_results else {}
+
+        if not analysis_results:
+            st.info("Run video analysis first to populate detected products.")
+        elif not pickups:
+            st.info("No product interactions detected in the video.")
+        else:
+            vid_rows = []
+            for yolo_cls, count in sorted(pickups.items(),
+                                          key=lambda x: x[1], reverse=True):
+                vid_rows.append({
+                    "Detected Product"  : YOLO_TO_PRODUCT.get(yolo_cls, yolo_cls),
+                    "YOLO Class"        : yolo_cls,
+                    "Person Interactions": count,
+                })
+            st.dataframe(pd.DataFrame(vid_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                f"Total persons tracked: **{det.get('persons_tracked', 0)}**  |  "
+                f"Unique product classes seen: **{det.get('products_detected', 0)}**"
+            )
+
+    # ── Mismatch Audit ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### ⚠️ Mismatch Audit")
+
+    if not analysis_results:
+        st.info("Run video analysis first.")
+        return
+    if not st.session_state.pos_items:
+        st.info("Add items to the POS transaction to compare.")
+        return
+
+    # Build POS dict: readable_name → qty
+    pos_dict: dict[str, int] = {}
+    for it in st.session_state.pos_items:
+        pos_dict[it["name"]] = pos_dict.get(it["name"], 0) + it["qty"]
+
+    # Build detected dict: readable_name → person_interaction_count
+    det_dict: dict[str, int] = {}
+    for yolo_cls, count in (analysis_results.get("product_pickups") or {}).items():
+        label = YOLO_TO_PRODUCT.get(yolo_cls, yolo_cls)
+        det_dict[label] = det_dict.get(label, 0) + count
+
+    # Collect all product names mentioned in either source
+    all_keys = set(pos_dict.keys()) | set(det_dict.keys())
+    audit_rows = []
+    flags = []
+    for name in sorted(all_keys):
+        pos_q = pos_dict.get(name, 0)
+        det_q = det_dict.get(name, 0)
+        if det_q > pos_q:
+            status = "🔴 NOT RUNG UP"
+            flags.append(f"**{name}**: detected {det_q}× but only {pos_q}× rung up")
+        elif pos_q > det_q and det_q == 0:
+            status = "🟡 NOT SEEN IN VIDEO"
+        else:
+            status = "🟢 OK"
+        audit_rows.append({
+            "Product"       : name,
+            "POS Qty"       : pos_q,
+            "Detected"      : det_q,
+            "Status"        : status,
+        })
+
+    import plotly.graph_objects as go
+
+    df_audit = pd.DataFrame(audit_rows)
+    st.dataframe(df_audit, use_container_width=True, hide_index=True)
+
+    if flags:
+        st.markdown("#### Potential Theft Flags")
+        for f in flags:
+            st.error(f)
+        total_unscanned = sum(
+            r["Detected"] - r["POS Qty"]
+            for r in audit_rows if r["Status"].startswith("🔴")
+        )
+        if total_unscanned > 0:
+            st.warning(
+                f"**{total_unscanned} product interaction(s)** detected by camera "
+                f"but not recorded in POS. This may indicate concealment or "
+                f"checkout bypass. **Human review required.**"
+            )
+    else:
+        st.success("No mismatches found — POS transaction matches video evidence.")
+
+    # Bar chart: POS vs detected
+    if len(audit_rows) > 0:
+        fig = go.Figure()
+        labels = [r["Product"] for r in audit_rows]
+        fig.add_bar(name="POS Qty",  x=labels,
+                    y=[r["POS Qty"]  for r in audit_rows], marker_color="#38ef7d")
+        fig.add_bar(name="Detected", x=labels,
+                    y=[r["Detected"] for r in audit_rows], marker_color="#667eea")
+        fig.update_layout(
+            barmode="group", title="POS Transaction vs Video Detection",
+            height=300, margin=dict(l=20, r=20, t=50, b=20),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
 # ─── Main App ─────────────────────────────────────────────────────────────────
 
 def main():
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
+    if "pos_items" not in st.session_state:
+        st.session_state.pos_items = []
 
     render_header()
     render_sidebar()
 
-    tab1, tab2 = st.tabs(["📊 Model Performance", "🎥 Video Analysis"])
+    tab1, tab2, tab3 = st.tabs(["📊 Model Performance", "🎥 Video Analysis", "🏪 POS Audit"])
 
     with tab1:
         render_model_performance_tab()
@@ -1052,6 +1349,9 @@ def main():
         if st.session_state.analysis_results:
             st.markdown("---")
             render_analysis_results(st.session_state.analysis_results)
+
+    with tab3:
+        render_pos_audit(st.session_state.analysis_results)
 
     st.markdown("---")
     st.markdown("""

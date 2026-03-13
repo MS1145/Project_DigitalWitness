@@ -1,0 +1,10 @@
+{
+  "classes": [
+    "normal",
+    "shoplifting"
+  ],
+  "best_val_acc": 0.9715909090909091,
+  "seq_len": 30,
+  "hidden": 256,
+  "layers": 2
+}
