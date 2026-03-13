@@ -138,6 +138,12 @@ def _build_combined_model(num_classes=2, hidden=256, layers=2, dropout=0.3):
             super().__init__()
             mn = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
             self.cnn = mn.features                    # keys cnn.0.* … cnn.18.*
+            # NOTE (architecture alignment):
+            # The notebook (CNNBiLSTMAttention) has forward(x: B,T,C,H,W) — it runs
+            # CNN inside forward. This app.py model matches the saved bilstm_dw.pt
+            # state dict layout but uses extract_cnn_feat() separately (offline),
+            # then passes (B, T, 1280) pre-extracted features to forward().
+            # Both share the SAME state dict keys — this is intentional.
             self.bilstm = nn.LSTM(
                 input_size=1280, hidden_size=hidden,
                 num_layers=layers, batch_first=True,
@@ -154,11 +160,16 @@ def _build_combined_model(num_classes=2, hidden=256, layers=2, dropout=0.3):
             )
 
         def extract_cnn_feat(self, frame_tensor):
-            """Extract 1280-dim feature from a single (1,3,224,224) tensor."""
+            """Extract 1280-dim feature from a single (1,3,224,224) tensor.
+            Used frame-by-frame during video processing in run_pipeline().
+            CNN runs with torch.no_grad() — weights are frozen for inference.
+            """
             with torch.no_grad():
                 return self.cnn(frame_tensor).mean([-2, -1])  # (1, 1280)
 
-        def forward(self, x):          # x: (B, T, 1280) pre-extracted features
+        def forward(self, x):
+            # x: (B, T, 1280) — pre-extracted MobileNetV2 features (not raw frames)
+            # CNN (self.cnn) is NOT called here; features come from extract_cnn_feat()
             out, _ = self.bilstm(x)
             ctx, attn = self.attention(out)
             return self.classifier(ctx), attn
@@ -555,7 +566,7 @@ def run_pipeline(video_path, progress_callback=None):
         },
         "quality_analysis": {
             "reliability_score": fairness,
-            "detection_rate"   : min(1.0, len(all_feats) / max(1, total_f // frame_step)),
+            "detection_rate"   : min(1.0, len(all_feats) / max(1, total_f // feat_step)),  # FIX: was frame_step (NameError)
             "usable"           : fairness >= 0.4,
         },
         "bias_report": {

@@ -3,7 +3,7 @@
     "normal",
     "shoplifting"
   ],
-  "best_val_acc": 0.9757227279987223,
+  "best_val_acc": 0.9770004791566842,
   "input_size": [
     224,
     224
