@@ -1,5 +1,5 @@
-train: C:\Users\MSI\Music\Project_DigitalWitness\data\dataset\train\images
-val: C:\Users\MSI\Music\Project_DigitalWitness\data\dataset\valid\images
+train: D:\Santosh\Project_DigitalWitness\data\dataset\train\images
+val: D:\Santosh\Project_DigitalWitness\data\dataset\valid\images
 nc: 24
 names:
 - backpack-or-handbag
@@ -32,4 +32,4 @@ roboflow:
   version: 2
   license: CC BY 4.0
   url: https://universe.roboflow.com/shoplifting-annotation-data/shoplifting-annotation/dataset/2
-test: C:\Users\MSI\Music\Project_DigitalWitness\data\dataset\test\images
+test: D:\Santosh\Project_DigitalWitness\data\dataset\test\images

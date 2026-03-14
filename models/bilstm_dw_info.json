@@ -3,9 +3,8 @@
     "normal",
     "shoplifting"
   ],
-  "best_val_acc": 0.9715909090909091,
-  "seq_len": 30,
+  "best_val_acc": 0.8859649122807017,
+  "seq_len": 45,
   "hidden": 256,
-  "layers": 2,
-  "n_val_samples": 880
+  "layers": 2
 }

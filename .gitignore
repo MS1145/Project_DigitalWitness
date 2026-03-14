@@ -25,7 +25,7 @@ __pycache__/
 
 # Data folder (large files - do not commit)
 data/
-frames/
+frames_v2/
 
 # Model files (large - download separately or train via notebook)
 models/*.pt
