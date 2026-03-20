@@ -92,7 +92,11 @@ st.markdown("""
         font-size: 1.1rem; font-weight: 600; border-radius: 10px;
     }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] { padding-left: 1rem; gap: 0.5rem; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f0f2f6; border-radius: 10px 10px 0 0;
+        padding: 0.4rem 1.2rem;
+    }
     .stTabs [aria-selected="true"] {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
     }
@@ -251,9 +255,15 @@ def run_pipeline(video_path, progress_callback=None,
     _cb(0.0, "Initialising models...")
     dev = _get_device()
 
+    # GPU tuning
+    if str(dev) == "cuda":
+        torch.backends.cudnn.benchmark = True
+
     # ── Load YOLO26 ──
     yolo_path  = get_active_yolo_path()
     yolo_model = YOLO(yolo_path)
+    _yolo_dev  = 0 if str(dev) == "cuda" else "cpu"   # int 0 = first CUDA device
+    _yolo_half = (str(dev) == "cuda")                  # FP16 inference on GPU
 
     # ── Load combined CNNBiLSTMAttention model (bilstm_dw.pt) ──
     lstm_classes = BEHAVIOR_CLASSES
@@ -335,13 +345,16 @@ def run_pipeline(video_path, progress_callback=None,
     width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     all_feats    = []
-    persons_set  = set()   # unique track IDs
-    products_set = set()   # unique product class names seen
+    persons_set  = set()   # unique track IDs (for proximity checks only)
+    max_concurrent_persons = 0  # peak persons visible in a single frame (accurate count)
+    products_set = set()   # unique product class names seen (internal YOLO tracking)
     # product pickup: set of (person_track_id, product_class) — one entry per
     # unique person×product pair that were in close proximity
     product_pickup_events = set()
     frame_num    = 0
-    feat_step    = 3   # extract CNN features every 3rd frame (speed)
+    feat_step    = 4   # extract CNN features every 4th frame (speed)
+    yolo_step    = 2   # run YOLO every 2nd frame; reuse last result otherwise
+    last_yolo_results = None
 
     # Probe window: scan first ~5 s then decide whether to continue
     probe_frames = max(int(fps_val * 5), 60)   # at least 60 frames
@@ -369,29 +382,44 @@ def run_pipeline(video_path, progress_callback=None,
             pct = min(0.05 + (frame_num / max(total_f, 1)) * 0.65, 0.70)
             _cb(pct, f"Processing frame {frame_num}/{total_f}...")
 
-        # ── YOLO26 detection + ByteTrack (EVERY frame → accurate track IDs) ──
-        results = yolo_model.track(
-            frame, conf=YOLO_CONF, iou=YOLO_IOU, persist=True, verbose=False
-        )[0]
+        # ── YOLO26 detection + ByteTrack ──
+        # Run every yolo_step frames; reuse last detection on skipped frames.
+        # imgsz=320 cuts YOLO inference time ~4× vs default 640 with minor accuracy trade-off.
+        if frame_num % yolo_step == 1 or last_yolo_results is None:
+            last_yolo_results = yolo_model.track(
+                frame, conf=YOLO_CONF, iou=YOLO_IOU, persist=True, verbose=False,
+                imgsz=320, device=_yolo_dev, half=_yolo_half,
+            )[0]
+        results = last_yolo_results
 
         frame_person_boxes  = {}   # {track_id: [x1,y1,x2,y2]}
         frame_product_boxes = []   # [(class_name, [x1,y1,x2,y2])]
 
         if results.boxes is not None:
-            ids = (results.boxes.id.int().tolist()
-                   if results.boxes.id is not None
-                   else list(range(-len(results.boxes.cls), 0)))
-            for box_t, cls_id, tid in zip(
+            # Only use real ByteTrack IDs — skip frames where tracking hasn't
+            # assigned IDs yet (avoids fake-ID inflation of persons_set)
+            real_ids = (results.boxes.id.int().tolist()
+                        if results.boxes.id is not None else None)
+            for i, (box_t, cls_id) in enumerate(zip(
                     results.boxes.xyxy.cpu().numpy(),
-                    results.boxes.cls, ids):
+                    results.boxes.cls)):
                 cls_name = yolo_model.names[int(cls_id)]
-                # Match "person", "person-with-*", "person with *" (retail model variants)
                 if cls_name == "person" or cls_name.startswith("person"):
-                    persons_set.add(tid)
-                    frame_person_boxes[tid] = box_t
+                    if real_ids is not None:
+                        tid = real_ids[i]
+                        persons_set.add(tid)   # unique track IDs only
+                        frame_person_boxes[tid] = box_t
+                    else:
+                        # No track ID yet — still draw box but don't count
+                        frame_person_boxes[-(i + 1)] = box_t
                 elif cls_name in PRODUCT_CLASSES:
                     products_set.add(cls_name)
                     frame_product_boxes.append((cls_name, box_t))
+
+        # Update max concurrent persons (frame-level peak — immune to ID reassignment)
+        real_person_count = sum(1 for k in frame_person_boxes if k >= 0)
+        if real_person_count > max_concurrent_persons:
+            max_concurrent_persons = real_person_count
 
         # ── Frame annotation (visual output + live preview) ───────────────────
         if video_writer or live_frame_callback:
@@ -420,7 +448,7 @@ def run_pipeline(video_path, progress_callback=None,
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
             # Stats overlay top-right
             _sw, _sh = ann.shape[1], ann.shape[0]
-            stats_txt = f"Persons: {len(persons_set)}  |  Products: {len(products_set)}"
+            stats_txt = f"Persons: {real_person_count}  |  Peak: {max_concurrent_persons}  |  Products: {len(products_set)}"
             (stw, sth), _ = cv2.getTextSize(stats_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(ann, (_sw - stw - 14, 8), (_sw - 4, sth + 22), (40, 40, 40), -1)
             cv2.putText(ann, stats_txt, (_sw - stw - 10, sth + 16),
@@ -438,8 +466,8 @@ def run_pipeline(video_path, progress_callback=None,
                              "green" if last_live_label == "normal" else "gray")
                 live_timeline.append(tl_color)
                 live_frame_callback(ann_rgb, frame_num, total_f, {
-                    "persons_tracked"  : len(persons_set),
-                    "products_detected": len(products_set),
+                    "persons_tracked"  : max_concurrent_persons,
+                    "products_detected": len({cls for (_, cls) in product_pickup_events}),
                     "label"            : last_live_label or "Analyzing...",
                     "conf"             : last_live_conf,
                     "timeline"         : list(live_timeline),
@@ -517,6 +545,8 @@ def run_pipeline(video_path, progress_callback=None,
     product_pickups = {}
     for (pid, cls_name) in product_pickup_events:
         product_pickups[cls_name] = product_pickups.get(cls_name, 0) + 1
+    # Distinct product classes actually interacted with (not all visible products)
+    products_interacted = len({cls for (_, cls) in product_pickup_events})
 
     _cb(0.72, "Running LSTM temporal classification...")
 
@@ -648,8 +678,8 @@ def run_pipeline(video_path, progress_callback=None,
             "is_shoplifting": overall_class == "shoplifting",
         },
         "detections": {
-            "persons_tracked"  : len(persons_set),
-            "products_detected": len(products_set),
+            "persons_tracked"  : max_concurrent_persons,
+            "products_detected": products_interacted,
             "interactions"     : len(susp_e),
             "frames_processed" : len(all_feats),
         },
@@ -749,39 +779,12 @@ def render_sidebar():
 
         st.markdown("---")
         st.markdown("### System Status")
-
-        if check_model_exists():
-            st.success("LSTM Model: Trained ✓")
-            metrics = load_model_metrics()
-            if metrics:
-                acc = metrics.get("final_val_acc",
-                      metrics.get("best_val_acc",
-                      metrics.get("metrics", {}).get("accuracy", 0)))
-                st.metric("Validation Accuracy", f"{acc:.1%}")
-                if "metrics" in metrics:
-                    m = metrics["metrics"]
-                    st.metric("F1 Score", f"{m.get('f1_score', 0):.1%}")
+        yolo_ready   = YOLO26_DW_V2.exists() or YOLO26_BASE.exists() or YOLO26_PATH.exists()
+        models_ready = check_model_exists() and yolo_ready
+        if models_ready:
+            st.success("All models loaded ✓")
         else:
-            st.warning("LSTM Model: Not trained")
-            st.info("Train in Colab with **DigitalWitness_Pipeline.ipynb**, then place `bilstm_dw.pt` in `models/`")
-
-        if YOLO26_DW_V2.exists():
-            yolo_status = "yolo26_dw_v2.pt ✓ (domain-adaptive)"
-        elif YOLO26_BASE.exists():
-            yolo_status = "yolo26n.pt ✓ (COCO base)"
-        elif YOLO26_PATH.exists():
-            yolo_status = "yolo26_retail.pt ✓ (retail only)"
-        else:
-            yolo_status = "Not found"
-        bilstm_status = "bilstm_dw.pt ✓" if LSTM_PATH.exists() else "Not found"
-
-        st.markdown("---")
-        st.markdown("### Model Files")
-        st.code(
-            f"YOLO26    : {yolo_status}\n"
-            f"BiLSTM    : {bilstm_status}",
-            language=None
-        )
+            st.warning("Some models missing — check `models/` folder")
 
         st.markdown("---")
         st.markdown("### Important Notice")
@@ -1017,8 +1020,8 @@ def render_analysis_results(results):
     st.markdown("### Detection Statistics")
     det = results.get("detections", {})
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Persons Tracked",  det.get("persons_tracked", 0))
-    c2.metric("Products Detected",det.get("products_detected", 0))
+    c1.metric("Persons in Scene",    det.get("persons_tracked", 0))
+    c2.metric("Products Interacted", det.get("products_detected", 0))
     c3.metric("Interactions",     det.get("interactions", 0))
     c4.metric("Frames Processed", det.get("frames_processed", 0))
     st.markdown("---")
