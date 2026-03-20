@@ -50,4 +50,4 @@ nul
 *.log
 
 # Claude Code settings (optional - can keep for team)
-# .claude/
+ .claude/
