@@ -271,15 +271,16 @@ class POSComparator:
                 f'{detected} product(s) detected, {billed} billed — counts match'
             )
 
-        # Additional flags from tracker
-        if person_summary['left_with_goods']:
+        # Additional flags from tracker (4-class schema)
+        if person_summary.get('shoplifting_ratio', 0) > 0.1:
             explanation_parts.append(
-                'Person left store with goods without visiting checkout'
+                f'Direct shoplifting detected in '
+                f'{person_summary["shoplifting_ratio"]:.0%} of tracked frames'
             )
-        if person_summary['concealment_ratio'] > 0.3:
+        if person_summary.get('concealment_ratio', 0) > 0.3:
             explanation_parts.append(
-                f'Backpack/bag present {person_summary["concealment_ratio"]:.0%} '
-                f'of tracked time — concealment risk'
+                f'Suspicious behaviour (Looking around / shoplifting) in '
+                f'{person_summary["concealment_ratio"]:.0%} of tracked time'
             )
 
         return {
@@ -289,9 +290,9 @@ class POSComparator:
             'difference'       : diff,
             'mismatch'         : mismatch,
             'mismatch_severity': mismatch_severity,
-            'left_with_goods'  : person_summary['left_with_goods'],
-            'concealment_ratio': person_summary['concealment_ratio'],
-            'checkout_visited' : person_summary['checkout_visited'],
+            'left_with_goods'  : not person_summary.get('checkout_visited', False),
+            'concealment_ratio': person_summary.get('concealment_ratio', 0),
+            'checkout_visited' : person_summary.get('checkout_visited', False),
             'receipt'          : transaction.get('receipt', {}),
             'till_id'          : transaction.get('till_id', 'N/A'),
             'payment_method'   : transaction.get('payment_method', 'N/A'),
@@ -303,11 +304,11 @@ class POSComparator:
         """Fallback when no matching POS transaction found."""
         detected = person_summary['max_products_held']
         flags    = []
-        if person_summary['left_with_goods']:
+        if not person_summary.get('checkout_visited', False):
             flags.append('Left store with goods — no checkout visit recorded')
-        if person_summary['concealment_ratio'] > 0.3:
-            flags.append(f'Concealment risk: bag present '
-                         f'{person_summary["concealment_ratio"]:.0%} of time')
+        if person_summary.get('concealment_ratio', 0) > 0.3:
+            flags.append(f'Suspicious behaviour in '
+                         f'{person_summary.get("concealment_ratio", 0):.0%} of tracked time')
 
         return {
             'session_id'       : None,
@@ -316,9 +317,9 @@ class POSComparator:
             'difference'       : None,
             'mismatch'         : True if flags else None,
             'mismatch_severity': 'UNKNOWN',
-            'left_with_goods'  : person_summary['left_with_goods'],
-            'concealment_ratio': person_summary['concealment_ratio'],
-            'checkout_visited' : person_summary['checkout_visited'],
+            'left_with_goods'  : not person_summary.get('checkout_visited', False),
+            'concealment_ratio': person_summary.get('concealment_ratio', 0),
+            'checkout_visited' : person_summary.get('checkout_visited', False),
             'receipt'          : {},
             'explanation'      : ('No matching POS transaction found. '
                                    + ' | '.join(flags) if flags

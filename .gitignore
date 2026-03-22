@@ -25,6 +25,7 @@ __pycache__/
 
 # Dataset (large files — do not commit)
 data/
+frames/
 
 # YOLO training artifacts
 runs/

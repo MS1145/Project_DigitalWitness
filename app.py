@@ -37,8 +37,8 @@ LSTM_INFO_PATH  = MODELS_DIR / "bilstm_dw_info.json"
 BEHAVIOR_CLASSES = ["normal", "shoplifting"]
 YOLO_CONF        = 0.2
 YOLO_IOU         = 0.45
-MOBILENET_DIM    = 1280   # raw MobileNetV2 output (no projection); matches bilstm_dw.pt
-LSTM_SEQ_LEN     = 30
+MOBILENET_DIM    = 1280   # raw MobileNetV2 output (before projection head)
+LSTM_SEQ_LEN     = 45    # must match notebook Cell 5: 45 frames @ 6fps = 7.5s
 LSTM_STRIDE      = 15
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -111,75 +111,100 @@ def _get_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _build_combined_model(num_classes=2, hidden=256, layers=2, dropout=0.3):
+def _build_mobilenet_extractor():
     """
-    CNNBiLSTMAttention — matches exact bilstm_dw.pt architecture from notebook.
+    Load MobileNetV2 feature extractor matching notebook Cell 4 architecture.
 
-    State dict key layout:
-      cnn.*            → MobileNetV2 features (layers 0-18), 1280-dim output
-      bilstm.*         → Bidirectional LSTM
-      attention.attn.* → Additive attention scorer (Linear → scalar)
-      classifier.*     → LayerNorm → Dropout → Linear(512,128) → ReLU → Linear(128,nc)
+    State dict keys (from mobilenet_dw.pt → 'state_dict'):
+      features.*    → MobileNetV2 backbone (layers 0-18)
+      pool.*        → AdaptiveAvgPool2d (no params)
+      classifier.*  → Linear(1280,512) → ReLU → Dropout → Linear(512,2)
 
-    During inference the model receives pre-extracted 1280-dim feature sequences
-    (B, T, 1280); the cnn sub-module is only used for live frame extraction.
+    Only features + pool are used here — classifier head is discarded.
+    extract_features() returns the 1280-dim vector used as BiLSTM input.
     """
-    import torch
     import torch.nn as nn
     from torchvision import models
     from torchvision.models import MobileNet_V2_Weights
 
-    class _Attention(nn.Module):
-        def __init__(self, dim):
-            super().__init__()
-            self.attn = nn.Linear(dim, 1)
-
-        def forward(self, x):          # x: (B, T, dim)
-            w = torch.softmax(self.attn(x), dim=1)   # (B, T, 1)
-            return (w * x).sum(1), w.squeeze(-1)      # (B, dim), (B, T)
-
-    class _Model(nn.Module):
+    class _MNetExtractor(nn.Module):
         def __init__(self):
             super().__init__()
-            mn = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
-            self.cnn = mn.features                    # keys cnn.0.* … cnn.18.*
-            # NOTE (architecture alignment):
-            # The notebook (CNNBiLSTMAttention) has forward(x: B,T,C,H,W) — it runs
-            # CNN inside forward. This app.py model matches the saved bilstm_dw.pt
-            # state dict layout but uses extract_cnn_feat() separately (offline),
-            # then passes (B, T, 1280) pre-extracted features to forward().
-            # Both share the SAME state dict keys — this is intentional.
+            base = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
+            self.features   = base.features
+            self.pool       = nn.AdaptiveAvgPool2d((1, 1))
+            # Classifier head — loaded from checkpoint but not used during feature extraction
+            self.classifier = nn.Sequential(
+                nn.Linear(1280, 512),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0.3),
+                nn.Linear(512, 2),
+            )
+
+        def extract_features(self, x):
+            """Return 1280-dim feature vector for a (1,3,224,224) tensor."""
+            import torch
+            with torch.no_grad():
+                x = self.features(x)
+                x = self.pool(x)
+                return x.flatten(1)   # (1, 1280)
+
+        def forward(self, x):
+            return self.classifier(self.extract_features(x))
+
+    return _MNetExtractor()
+
+
+def _build_bilstm(num_classes=2, hidden=256, layers=2, dropout=0.3):
+    """
+    BiLSTMAttentionClassifier — matches exact notebook Cell 5 architecture.
+
+    State dict keys (from bilstm_dw.pt → 'state_dict'):
+      bilstm.*            → nn.LSTM bidirectional
+      attention.attn.0.*  → Linear(hidden*2, hidden)  [Tanh has no params]
+      attention.attn.2.*  → Linear(hidden, 1)
+      dropout             → no params
+      classifier.*        → Linear(hidden*2, num_classes)
+
+    Input: (B, T=45, 1280) pre-extracted MobileNetV2 feature sequences.
+    """
+    import torch
+    import torch.nn as nn
+
+    class _TemporalAttention(nn.Module):
+        def __init__(self, h):
+            super().__init__()
+            self.attn = nn.Sequential(
+                nn.Linear(h, h // 2),
+                nn.Tanh(),
+                nn.Linear(h // 2, 1),
+            )
+
+        def forward(self, lstm_out):   # (B, T, h)
+            scores  = self.attn(lstm_out).squeeze(-1)   # (B, T)
+            weights = torch.softmax(scores, dim=1)       # (B, T)
+            context = torch.bmm(weights.unsqueeze(1), lstm_out).squeeze(1)
+            return context, weights
+
+    class _BiLSTM(nn.Module):
+        def __init__(self):
+            super().__init__()
             self.bilstm = nn.LSTM(
                 input_size=1280, hidden_size=hidden,
                 num_layers=layers, batch_first=True,
                 bidirectional=True,
-                dropout=dropout if layers > 1 else 0,
+                dropout=dropout if layers > 1 else 0.0,
             )
-            self.attention = _Attention(hidden * 2)   # key: attention.attn.*
-            self.classifier = nn.Sequential(
-                nn.LayerNorm(hidden * 2),             # classifier.0
-                nn.Dropout(dropout),                  # classifier.1 (no params)
-                nn.Linear(hidden * 2, 128),           # classifier.2
-                nn.ReLU(),                            # classifier.3 (no params)
-                nn.Linear(128, num_classes),          # classifier.4
-            )
+            self.attention  = _TemporalAttention(hidden * 2)
+            self.dropout    = nn.Dropout(dropout)
+            self.classifier = nn.Linear(hidden * 2, num_classes)
 
-        def extract_cnn_feat(self, frame_tensor):
-            """Extract 1280-dim feature from a single (1,3,224,224) tensor.
-            Used frame-by-frame during video processing in run_pipeline().
-            CNN runs with torch.no_grad() — weights are frozen for inference.
-            """
-            with torch.no_grad():
-                return self.cnn(frame_tensor).mean([-2, -1])  # (1, 1280)
-
-        def forward(self, x):
-            # x: (B, T, 1280) — pre-extracted MobileNetV2 features (not raw frames)
-            # CNN (self.cnn) is NOT called here; features come from extract_cnn_feat()
-            out, _ = self.bilstm(x)
+        def forward(self, x):   # x: (B, T, 1280)
+            out, _    = self.bilstm(x)
             ctx, attn = self.attention(out)
-            return self.classifier(ctx), attn
+            return self.classifier(self.dropout(ctx)), attn
 
-    return _Model()
+    return _BiLSTM()
 
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -265,16 +290,28 @@ def run_pipeline(video_path, progress_callback=None,
     _yolo_dev  = 0 if str(dev) == "cuda" else "cpu"   # int 0 = first CUDA device
     _yolo_half = (str(dev) == "cuda")                  # FP16 inference on GPU
 
-    # ── Load combined CNNBiLSTMAttention model (bilstm_dw.pt) ──
-    lstm_classes = BEHAVIOR_CLASSES
-    combined_model = _build_combined_model(
-        num_classes=len(lstm_classes), hidden=256, layers=2, dropout=0.3
-    ).to(dev)
+    # ── Load MobileNetV2 feature extractor (mobilenet_dw.pt) ──
+    # Uses the fine-tuned weights from notebook Cell 4 — critical for accuracy.
+    # Features extracted here are what the BiLSTM was trained on.
+    mnet_model = _build_mobilenet_extractor().to(dev)
+    mnet_path  = MODELS_DIR / "mobilenet_dw.pt"
+    if mnet_path.exists():
+        mnet_ckpt = torch.load(mnet_path, map_location=dev, weights_only=False)
+        sd = mnet_ckpt['state_dict'] if isinstance(mnet_ckpt, dict) and 'state_dict' in mnet_ckpt else mnet_ckpt
+        mnet_model.load_state_dict(sd)
+    mnet_model.eval()
+
+    # ── Load BiLSTM classifier (bilstm_dw.pt) ──
+    # Architecture matches notebook Cell 5 BiLSTMAttentionClassifier exactly.
+    lstm_classes  = BEHAVIOR_CLASSES
+    bilstm_model  = _build_bilstm(num_classes=len(lstm_classes), hidden=256,
+                                   layers=2, dropout=0.3).to(dev)
     if LSTM_PATH.exists():
-        state_dict = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
-        combined_model.load_state_dict(state_dict)
-    # If not found: model keeps random ImageNet+random LSTM weights — flagged in UI
-    combined_model.eval()
+        bilstm_ckpt = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
+        sd = bilstm_ckpt['state_dict'] if isinstance(bilstm_ckpt, dict) and 'state_dict' in bilstm_ckpt else bilstm_ckpt
+        bilstm_model.load_state_dict(sd)
+    # If not found: keeps random weights — flagged in UI
+    bilstm_model.eval()
 
     # ── Image preprocessing transform ──
     xform = transforms.Compose([
@@ -285,16 +322,13 @@ def run_pipeline(video_path, progress_callback=None,
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    PRODUCT_CLASSES = {
-        # COCO base model classes
-        "bottle", "cup", "bowl", "banana", "apple", "sandwich",
-        "backpack", "handbag", "book", "cell phone", "orange", "donut",
-        # Retail fine-tuned model classes
-        "backpack-or-handbag", "carrying-item",
-        "empty-basket", "filled-basket",
-        "empty-shopping-bags", "filled-shopping-bags",
-        "empty-trolly", "filled-trolly",
-    }
+    # 4-class behaviour model — ALL detections are person-level behaviour labels.
+    # There is no separate "person" class; each box is one of these four.
+    BEHAVIOUR_4CLS = {"Looking around", "Picking-Holding", "normal", "shoplifting"}
+    # Suspicious classes used for intent scoring
+    SUSPICIOUS_CLS = {"Looking around", "shoplifting"}
+    # Product-interaction class (replaces the old product proximity logic)
+    PRODUCT_CLS    = {"Picking-Holding"}
 
     def _early_exit_normal(reason, f_num, f_total, fps, w, h):
         """Return a lightweight 'normal / no person' result without running BiLSTM."""
@@ -396,25 +430,31 @@ def run_pipeline(video_path, progress_callback=None,
         frame_product_boxes = []   # [(class_name, [x1,y1,x2,y2])]
 
         if results.boxes is not None:
-            # Only use real ByteTrack IDs — skip frames where tracking hasn't
-            # assigned IDs yet (avoids fake-ID inflation of persons_set)
+            # 4-class model: every detection is a person-level behaviour label.
+            # ByteTrack assigns persistent IDs so we count unique persons correctly.
             real_ids = (results.boxes.id.int().tolist()
                         if results.boxes.id is not None else None)
             for i, (box_t, cls_id) in enumerate(zip(
                     results.boxes.xyxy.cpu().numpy(),
                     results.boxes.cls)):
                 cls_name = yolo_model.names[int(cls_id)]
-                if cls_name == "person" or cls_name.startswith("person"):
-                    if real_ids is not None:
-                        tid = real_ids[i]
-                        persons_set.add(tid)   # unique track IDs only
-                        frame_person_boxes[tid] = box_t
-                    else:
-                        # No track ID yet — still draw box but don't count
-                        frame_person_boxes[-(i + 1)] = box_t
-                elif cls_name in PRODUCT_CLASSES:
+                if cls_name not in BEHAVIOUR_4CLS:
+                    continue   # skip any non-behaviour detections
+                # All 4 classes are person detections
+                if real_ids is not None:
+                    tid = real_ids[i]
+                    persons_set.add(tid)
+                    frame_person_boxes[tid] = box_t
+                else:
+                    frame_person_boxes[-(i + 1)] = box_t
+                # Picking-Holding = product interaction
+                if cls_name in PRODUCT_CLS:
                     products_set.add(cls_name)
                     frame_product_boxes.append((cls_name, box_t))
+                # Track suspicious behaviour detections for intent scoring
+                if cls_name in SUSPICIOUS_CLS:
+                    product_pickup_events.add((real_ids[i] if real_ids else -(i+1),
+                                               cls_name))
 
         # Update max concurrent persons (frame-level peak — immune to ID reassignment)
         real_person_count = sum(1 for k in frame_person_boxes if k >= 0)
@@ -501,11 +541,11 @@ def run_pipeline(video_path, progress_callback=None,
                 if dist < ph * 1.2:   # within 1.2× person height ≈ arm's reach
                     product_pickup_events.add((pid, cls_name))
 
-        # ── CNN feature extraction (every feat_step frames for speed) ──
+        # ── MobileNetV2 feature extraction (every feat_step frames for speed) ──
         if frame_num % feat_step == 0:
             rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             x    = xform(rgb).unsqueeze(0).to(dev)
-            feat = combined_model.extract_cnn_feat(x).cpu().numpy().flatten()
+            feat = mnet_model.extract_features(x).cpu().numpy().flatten()
             all_feats.append(feat)
             # Rolling BiLSTM for live badge — run once every LSTM_STRIDE features
             if (video_writer or live_frame_callback) and \
@@ -514,7 +554,7 @@ def run_pipeline(video_path, progress_callback=None,
                 with torch.no_grad():
                     _seq_np = np.array(all_feats[-LSTM_SEQ_LEN:])
                     _xt     = torch.FloatTensor(_seq_np[np.newaxis]).to(dev)
-                    _log, _ = combined_model(_xt)
+                    _log, _ = bilstm_model(_xt)
                     _prb    = torch.softmax(_log, dim=1).cpu().numpy()[0]
                 last_live_label = lstm_classes[int(np.argmax(_prb))]
                 last_live_conf  = float(np.max(_prb))
@@ -559,7 +599,7 @@ def run_pipeline(video_path, progress_callback=None,
         seq = np.vstack([feats_arr, pad])
         x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
         with torch.no_grad():
-            logits, _ = combined_model(x_t)
+            logits, _ = bilstm_model(x_t)
             probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
         scale = len(all_feats) / LSTM_SEQ_LEN
         predictions.append({
@@ -574,7 +614,7 @@ def run_pipeline(video_path, progress_callback=None,
             seq = feats_arr[start:start + LSTM_SEQ_LEN]
             x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
             with torch.no_grad():
-                logits, _ = combined_model(x_t)
+                logits, _ = bilstm_model(x_t)
                 probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
             predictions.append({
                 "start"        : start / fps_val,
@@ -605,15 +645,18 @@ def run_pipeline(video_path, progress_callback=None,
     _cb(0.90, "Scoring intent...")
 
     # ── Intent scoring (video-only, no POS) ──
-    conceal_e = [p for p in predictions
-                 if p["behavior_type"] in {"shoplifting", "concealment"}]
-    bypass_e  = [p for p in predictions if p["behavior_type"] == "bypass"]
-    susp_e    = [p for p in predictions
-                 if p["behavior_type"] in {"shoplifting", "concealment", "bypass"}]
+    # With 4-class model: "shoplifting" = direct detection, "Looking around" = recon.
+    # No "concealment" or "bypass" classes exist — map to closest equivalents.
+    direct_e  = [p for p in predictions if p["behavior_type"] == "shoplifting"]
+    recon_e   = [p for p in predictions if p["behavior_type"] == "Looking around"]
+    susp_e    = direct_e + recon_e
 
-    s_conceal = (np.mean([e["confidence"] for e in conceal_e])
-                 * min(1.0, len(conceal_e) / 3.0)) if conceal_e else 0.0
-    s_bypass  = max((e["confidence"] for e in bypass_e), default=0.0)
+    # s_conceal: weighted by direct shoplifting confidence (primary signal)
+    s_conceal = (np.mean([e["confidence"] for e in direct_e])
+                 * min(1.0, len(direct_e) / 3.0)) if direct_e else 0.0
+    # s_bypass: reconnaissance behaviour is the closest proxy for bypass intent
+    s_bypass  = (np.mean([e["confidence"] for e in recon_e])
+                 * min(1.0, len(recon_e) / 3.0)) if recon_e else 0.0
     susp_secs = sum(e["end"] - e["start"] for e in susp_e)
     s_dur     = min(1.0, (susp_secs / max(1.0, duration)) * 3.0) if susp_e else 0.0
 
@@ -718,7 +761,7 @@ def extract_suspicious_frames(video_path, behavior_events, max_frames=4):
     import cv2
     suspicious = [
         e for e in behavior_events
-        if e.get("behavior_type") in {"shoplifting", "concealment", "bypass"}
+        if e.get("behavior_type") in {"shoplifting", "Looking around"}
         and e.get("confidence", 0) > 0.5
     ]
     if not suspicious:

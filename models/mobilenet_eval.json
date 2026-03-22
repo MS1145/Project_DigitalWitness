@@ -1,0 +1,18 @@
+{
+  "model": "MobileNetV2",
+  "test_samples": 9363,
+  "accuracy": 0.991135319876108,
+  "precision": 0.991267191083266,
+  "recall": 0.991135319876108,
+  "f1_score": 0.9911550398564292,
+  "confusion_matrix": [
+    [
+      3194,
+      11
+    ],
+    [
+      72,
+      6086
+    ]
+  ]
+}
