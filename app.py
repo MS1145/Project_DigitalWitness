@@ -290,6 +290,14 @@ def run_pipeline(video_path, progress_callback=None,
     _yolo_dev  = 0 if str(dev) == "cuda" else "cpu"   # int 0 = first CUDA device
     _yolo_half = (str(dev) == "cuda")                  # FP16 inference on GPU
 
+    # Auto-detect which model is loaded so detection logic adapts automatically.
+    # 4-class fine-tuned model  → class names are behaviour labels (Looking around, etc.)
+    # Base COCO / old 24-class  → class names include "person", "backpack", etc.
+    _yolo_names   = set(yolo_model.names.values())
+    IS_4CLS_MODEL = "Looking around" in _yolo_names or "Picking-Holding" in _yolo_names
+    _cb(0.02, f"YOLO model: {'4-class behaviour' if IS_4CLS_MODEL else 'COCO/base'} "
+              f"({Path(yolo_path).name})")
+
     # ── Load MobileNetV2 feature extractor (mobilenet_dw.pt) ──
     # Uses the fine-tuned weights from notebook Cell 4 — critical for accuracy.
     # Features extracted here are what the BiLSTM was trained on.
@@ -430,31 +438,45 @@ def run_pipeline(video_path, progress_callback=None,
         frame_product_boxes = []   # [(class_name, [x1,y1,x2,y2])]
 
         if results.boxes is not None:
-            # 4-class model: every detection is a person-level behaviour label.
-            # ByteTrack assigns persistent IDs so we count unique persons correctly.
             real_ids = (results.boxes.id.int().tolist()
                         if results.boxes.id is not None else None)
             for i, (box_t, cls_id) in enumerate(zip(
                     results.boxes.xyxy.cpu().numpy(),
                     results.boxes.cls)):
                 cls_name = yolo_model.names[int(cls_id)]
-                if cls_name not in BEHAVIOUR_4CLS:
-                    continue   # skip any non-behaviour detections
-                # All 4 classes are person detections
-                if real_ids is not None:
-                    tid = real_ids[i]
+
+                if IS_4CLS_MODEL:
+                    # ── 4-class behaviour model ──────────────────────────────
+                    # Every detection is a person-level behaviour label.
+                    if cls_name not in BEHAVIOUR_4CLS:
+                        continue
+                    tid = (real_ids[i] if real_ids is not None else -(i + 1))
                     persons_set.add(tid)
                     frame_person_boxes[tid] = box_t
+                    if cls_name in PRODUCT_CLS:
+                        products_set.add(cls_name)
+                        frame_product_boxes.append((cls_name, box_t))
+                    if cls_name in SUSPICIOUS_CLS:
+                        product_pickup_events.add((tid, cls_name))
                 else:
-                    frame_person_boxes[-(i + 1)] = box_t
-                # Picking-Holding = product interaction
-                if cls_name in PRODUCT_CLS:
-                    products_set.add(cls_name)
-                    frame_product_boxes.append((cls_name, box_t))
-                # Track suspicious behaviour detections for intent scoring
-                if cls_name in SUSPICIOUS_CLS:
-                    product_pickup_events.add((real_ids[i] if real_ids else -(i+1),
-                                               cls_name))
+                    # ── Base COCO / old 24-class fallback ────────────────────
+                    # Person classes start with "person" or equal "person".
+                    is_person  = cls_name == "person" or cls_name.startswith("person-")
+                    is_product = cls_name in {
+                        "bottle", "cup", "bowl", "banana", "apple", "sandwich",
+                        "backpack", "handbag", "book", "cell phone", "orange",
+                        "backpack-or-handbag", "carrying-item",
+                        "empty-basket", "filled-basket",
+                        "empty-shopping-bags", "filled-shopping-bags",
+                        "empty-trolly", "filled-trolly",
+                    }
+                    if is_person:
+                        tid = (real_ids[i] if real_ids is not None else -(i + 1))
+                        persons_set.add(tid)
+                        frame_person_boxes[tid] = box_t
+                    elif is_product:
+                        products_set.add(cls_name)
+                        frame_product_boxes.append((cls_name, box_t))
 
         # Update max concurrent persons (frame-level peak — immune to ID reassignment)
         real_person_count = sum(1 for k in frame_person_boxes if k >= 0)
@@ -683,7 +705,7 @@ def run_pipeline(video_path, progress_callback=None,
     # ── Alert ──
     alert = None
     if adj_score >= 0.5:
-        n_susp = len(conceal_e) + len(bypass_e)
+        n_susp = len(direct_e) + len(recon_e)
         alert  = {
             "alert_id": f"ALERT-{datetime.now().strftime('%Y%m%d%H%M%S')}-0001",
             "level"   : severity,
@@ -761,7 +783,8 @@ def extract_suspicious_frames(video_path, behavior_events, max_frames=4):
     import cv2
     suspicious = [
         e for e in behavior_events
-        if e.get("behavior_type") in {"shoplifting", "Looking around"}
+        if e.get("behavior_type") in {"shoplifting", "Looking around",
+                                       "concealment", "bypass"}
         and e.get("confidence", 0) > 0.5
     ]
     if not suspicious:
