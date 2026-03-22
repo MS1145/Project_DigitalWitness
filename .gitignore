@@ -23,16 +23,8 @@ __pycache__/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Data folder (large files - do not commit)
+# Dataset (large files — do not commit)
 data/
-frames_v2/
-
-# Model files (large - download separately or train via notebook)
-models/*.pt
-models/*.pkl
-models/*.pth
-models/video_processing_log.json
-models/lstm_classifier_info.json
 
 # YOLO training artifacts
 runs/
@@ -49,5 +41,5 @@ nul
 # Logs
 *.log
 
-# Claude Code settings (optional - can keep for team)
- .claude/
+# Claude Code settings
+.claude/
