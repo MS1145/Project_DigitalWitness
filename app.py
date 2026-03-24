@@ -7,7 +7,6 @@ Pipeline: YOLO26 (detection) → MobileNetV2 (features) → LSTM (classification
 import streamlit as st
 import tempfile
 import os
-import sys
 import json
 from pathlib import Path
 from datetime import datetime
@@ -17,7 +16,7 @@ import pandas as pd
 # ─── Page config (must be first Streamlit call) ───────────────────────────────
 st.set_page_config(
     page_title="Digital Witness - Retail Security Assistant",
-    page_icon="🛡️",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -291,12 +290,13 @@ def run_pipeline(video_path, progress_callback=None,
     _yolo_half = (str(dev) == "cuda")                  # FP16 inference on GPU
 
     # Auto-detect which model is loaded so detection logic adapts automatically.
-    # 4-class fine-tuned model  → class names are behaviour labels (Looking around, etc.)
-    # Base COCO / old 24-class  → class names include "person", "backpack", etc.
     _yolo_names   = set(yolo_model.names.values())
+    _yolo_names_lower = {n.lower() for n in _yolo_names}
     IS_4CLS_MODEL = "Looking around" in _yolo_names or "Picking-Holding" in _yolo_names
-    _cb(0.02, f"YOLO model: {'4-class behaviour' if IS_4CLS_MODEL else 'COCO/base'} "
-              f"({Path(yolo_path).name})")
+    IS_COCO_MODEL = "person" in _yolo_names_lower   # base COCO or COCO-derived
+    _mode = "4-class behaviour" if IS_4CLS_MODEL else ("COCO" if IS_COCO_MODEL else "retail/unknown")
+    _cb(0.02, f"YOLO model: {_mode} ({Path(yolo_path).name}) — "
+              f"classes: {sorted(_yolo_names)[:6]}...")
 
     # ── Load MobileNetV2 feature extractor (mobilenet_dw.pt) ──
     # Uses the fine-tuned weights from notebook Cell 4 — critical for accuracy.
@@ -398,10 +398,6 @@ def run_pipeline(video_path, progress_callback=None,
     yolo_step    = 2   # run YOLO every 2nd frame; reuse last result otherwise
     last_yolo_results = None
 
-    # Probe window: scan first ~5 s then decide whether to continue
-    probe_frames = max(int(fps_val * 5), 60)   # at least 60 frames
-    probe_done   = False
-
     # ── Visual output setup ────────────────────────────────────────────────────
     video_writer     = None
     last_live_label  = None
@@ -459,9 +455,20 @@ def run_pipeline(video_path, progress_callback=None,
                     if cls_name in SUSPICIOUS_CLS:
                         product_pickup_events.add((tid, cls_name))
                 else:
-                    # ── Base COCO / old 24-class fallback ────────────────────
-                    # Person classes start with "person" or equal "person".
-                    is_person  = cls_name == "person" or cls_name.startswith("person-")
+                    # ── COCO / retail / unknown model fallback ───────────────
+                    # Person detection strategy (in priority order):
+                    #  1. Class ID 0  — always "person" in any COCO-based model
+                    #  2. Class name "person" (case-insensitive)
+                    #  3. Name starts with "person" (e.g. "person-picking-up")
+                    #  4. Unknown model with no "person" class — treat ALL boxes
+                    #     as persons so tracking is never silently broken
+                    cls_id_int = int(cls_id)
+                    is_person  = (
+                        cls_id_int == 0                          # COCO class 0 = person
+                        or cls_name.lower() == "person"
+                        or cls_name.lower().startswith("person-")
+                        or (not IS_COCO_MODEL)                   # unknown model: count all
+                    )
                     is_product = cls_name in {
                         "bottle", "cup", "bowl", "banana", "apple", "sandwich",
                         "backpack", "handbag", "book", "cell phone", "orange",
@@ -471,35 +478,56 @@ def run_pipeline(video_path, progress_callback=None,
                         "empty-trolly", "filled-trolly",
                     }
                     if is_person:
-                        tid = (real_ids[i] if real_ids is not None else -(i + 1))
+                        tid = (real_ids[i] if real_ids is not None else i + 1)
                         persons_set.add(tid)
                         frame_person_boxes[tid] = box_t
                     elif is_product:
                         products_set.add(cls_name)
                         frame_product_boxes.append((cls_name, box_t))
 
-        # Update max concurrent persons (frame-level peak — immune to ID reassignment)
-        real_person_count = sum(1 for k in frame_person_boxes if k >= 0)
+        # Update max concurrent persons.
+        # Count ALL entries — negative IDs are legitimate detections from frames
+        # where ByteTrack hasn't yet established tracks (first few frames, or
+        # low-confidence scenes). Filtering by k >= 0 was silently zeroing the
+        # count whenever ByteTrack was unavailable.
+        real_person_count = len(frame_person_boxes)
         if real_person_count > max_concurrent_persons:
             max_concurrent_persons = real_person_count
 
         # ── Frame annotation (visual output + live preview) ───────────────────
         if video_writer or live_frame_callback:
             ann = frame.copy()
-            # Draw YOLO bounding boxes
+            # Draw bounding boxes + labels for every YOLO detection
             if results.boxes is not None:
                 for box_t, cls_id_v, conf_v in zip(
                         results.boxes.xyxy.cpu().numpy(),
                         results.boxes.cls.cpu().numpy(),
                         results.boxes.conf.cpu().numpy()):
                     x1, y1, x2, y2 = map(int, box_t)
-                    cn_v  = yolo_model.names[int(cls_id_v)]
-                    is_p  = cn_v == "person" or cn_v.startswith("person")
-                    col_v = (0, 200, 0) if is_p else (200, 120, 0)
+                    cn_v = yolo_model.names[int(cls_id_v)]
+                    if IS_4CLS_MODEL:
+                        if cn_v == "shoplifting":
+                            col_v = (0, 0, 220)      # red  (BGR)
+                        elif cn_v == "Looking around":
+                            col_v = (0, 140, 255)    # orange
+                        elif cn_v == "Picking-Holding":
+                            col_v = (0, 200, 255)    # yellow
+                        else:                        # normal
+                            col_v = (0, 200, 0)      # green
+                        lbl_v = f"{cn_v} {conf_v:.0%}"
+                    else:
+                        is_p  = int(cls_id_v) == 0 or cn_v.lower() == "person"
+                        col_v = (0, 200, 0) if is_p else (160, 160, 160)
+                        lbl_v = f"Person {conf_v:.0%}" if is_p else f"{cn_v} {conf_v:.0%}"
+                    # Bounding box
                     cv2.rectangle(ann, (x1, y1), (x2, y2), col_v, 2)
-                    lbl_v = f"{'Person' if is_p else cn_v} {conf_v:.0%}"
-                    cv2.putText(ann, lbl_v, (x1, max(y1 - 5, 12)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, col_v, 1, cv2.LINE_AA)
+                    # Label background pill above the box
+                    (tw, th), _ = cv2.getTextSize(lbl_v, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                    lbl_y = max(y1 - 4, th + 6)
+                    cv2.rectangle(ann, (x1, lbl_y - th - 6), (x1 + tw + 8, lbl_y + 2),
+                                  col_v, -1)
+                    cv2.putText(ann, lbl_v, (x1 + 4, lbl_y - 2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
             # Draw classification badge (last known BiLSTM verdict)
             if last_live_label:
                 b_col = (0, 50, 200) if last_live_label == "shoplifting" else (20, 140, 20)
@@ -508,15 +536,8 @@ def run_pipeline(video_path, progress_callback=None,
                 cv2.rectangle(ann, (8, 8), (tw_b + 18, th_b + 22), b_col, -1)
                 cv2.putText(ann, b_txt, (12, th_b + 16),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-            # Stats overlay top-right
-            _sw, _sh = ann.shape[1], ann.shape[0]
-            stats_txt = f"Persons: {real_person_count}  |  Peak: {max_concurrent_persons}  |  Products: {len(products_set)}"
-            (stw, sth), _ = cv2.getTextSize(stats_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(ann, (_sw - stw - 14, 8), (_sw - 4, sth + 22), (40, 40, 40), -1)
-            cv2.putText(ann, stats_txt, (_sw - stw - 10, sth + 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
             # Frame counter bottom-left
-            cv2.putText(ann, f"{frame_num}/{total_f}", (8, _sh - 10),
+            cv2.putText(ann, f"{frame_num}/{total_f}", (8, ann.shape[0] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
             # Write to VideoWriter
             if video_writer:
@@ -534,20 +555,6 @@ def run_pipeline(video_path, progress_callback=None,
                     "conf"             : last_live_conf,
                     "timeline"         : list(live_timeline),
                 })
-
-        # ── Edge case: probe window elapsed — exit early if no person found ──
-        if not probe_done and frame_num >= probe_frames:
-            probe_done = True
-            if not persons_set:
-                if video_writer:
-                    video_writer.release()
-                cap.release()
-                _cb(1.0, "No persons detected — returning normal.")
-                return _early_exit_normal(
-                    f"No person detected in the first {frame_num} frames "
-                    f"({frame_num/fps_val:.1f} s). Classified as normal.",
-                    frame_num, total_f, fps_val, width, height,
-                )
 
         # ── Person-product proximity → detect pickups ──
         for pid, pbox in frame_person_boxes.items():
@@ -577,9 +584,9 @@ def run_pipeline(video_path, progress_callback=None,
                     _seq_np = np.array(all_feats[-LSTM_SEQ_LEN:])
                     _xt     = torch.FloatTensor(_seq_np[np.newaxis]).to(dev)
                     _log, _ = bilstm_model(_xt)
-                    _prb    = torch.softmax(_log, dim=1).cpu().numpy()[0]
+                    _prb    = torch.softmax(_log / 3.0, dim=1).cpu().numpy()[0]
                 last_live_label = lstm_classes[int(np.argmax(_prb))]
-                last_live_conf  = float(np.max(_prb))
+                last_live_conf  = min(float(np.max(_prb)) * 0.85, 0.82)
 
     if video_writer:
         video_writer.release()
@@ -622,13 +629,19 @@ def run_pipeline(video_path, progress_callback=None,
         x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
         with torch.no_grad():
             logits, _ = bilstm_model(x_t)
-            probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
-        scale = len(all_feats) / LSTM_SEQ_LEN
+        # T=3.0 temperature scaling: divides logits before softmax to flatten
+        # overconfident distributions. The *0.85 scale factor further prevents
+        # near-certain outputs — an untrained/overfit model should never claim
+        # certainty. Sequence-length scale penalises very short clips.
+        TEMP = 3.0
+        probs    = torch.softmax(logits / TEMP, dim=1).cpu().numpy()[0]
+        scale    = min(1.0, len(all_feats) / LSTM_SEQ_LEN)
+        raw_conf = float(np.max(probs)) * scale
         predictions.append({
             "start"        : 0.0,
             "end"          : duration,
             "behavior_type": lstm_classes[int(np.argmax(probs))],
-            "confidence"   : float(np.max(probs)) * scale,
+            "confidence"   : min(raw_conf * 0.85, 0.82),
             "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
         })
     else:
@@ -637,12 +650,12 @@ def run_pipeline(video_path, progress_callback=None,
             x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
             with torch.no_grad():
                 logits, _ = bilstm_model(x_t)
-                probs     = torch.softmax(logits, dim=1).cpu().numpy()[0]
+                probs     = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
             predictions.append({
                 "start"        : start / fps_val,
                 "end"          : (start + LSTM_SEQ_LEN) / fps_val,
                 "behavior_type": lstm_classes[int(np.argmax(probs))],
-                "confidence"   : float(np.max(probs)),
+                "confidence"   : min(float(np.max(probs)) * 0.85, 0.82),
                 "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
             })
 
@@ -778,39 +791,88 @@ def run_pipeline(video_path, progress_callback=None,
     }
 
 
-def extract_suspicious_frames(video_path, behavior_events, max_frames=4):
-    """Extract key frames from the highest-confidence suspicious events."""
+def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
+    """
+    Extract up to max_clips distinct static frame snapshots from the highest-
+    confidence shoplifting windows.  Frames must be at least 2 s apart so
+    overlapping LSTM windows never produce duplicate images.
+
+    Returns a list of dicts (one per unique moment):
+        thumbnail   : ndarray (RGB) — the captured frame
+        timestamp   : float  — mid-point of the window in seconds
+        frame_start : int    — first frame number of the window
+        frame_end   : int    — last frame number of the window
+        behavior    : str
+        confidence  : float
+    """
     import cv2
+
     suspicious = [
         e for e in behavior_events
         if e.get("behavior_type") in {"shoplifting", "Looking around",
                                        "concealment", "bypass"}
-        and e.get("confidence", 0) > 0.5
+        and e.get("confidence", 0) >= 0.5
     ]
     if not suspicious:
         return []
-    suspicious = sorted(suspicious, key=lambda x: x.get("confidence", 0), reverse=True)[:max_frames]
 
-    frames = []
+    # Sort by confidence descending; keep only events whose midpoint is
+    # at least 2 s away from every already-selected event.
+    suspicious = sorted(suspicious, key=lambda x: x.get("confidence", 0), reverse=True)
+    selected, selected_mids = [], []
+    for ev in suspicious:
+        mid = (ev.get("start_time", 0) + ev.get("end_time", 0)) / 2
+        if all(abs(mid - t) >= 2.0 for t in selected_mids):
+            selected.append(ev)
+            selected_mids.append(mid)
+        if len(selected) >= max_clips:
+            break
+
+    if not selected:
+        return []
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return []
-    fps_v = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    for ev in suspicious:
-        mid_t = (ev.get("start_time", 0) + ev.get("end_time", 1)) / 2
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(mid_t * fps_v))
+
+    fps_v   = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    MAX_WIDTH = 640
+    frames = []
+
+    for ev in selected:
+        ev_start = ev.get("start_time", 0)
+        ev_end   = ev.get("end_time", ev_start + 1)
+        mid_sec  = (ev_start + ev_end) / 2
+        mid_f    = max(0, min(total_f - 1, int(mid_sec * fps_v)))
+        start_f  = int(ev_start * fps_v)
+        end_f    = int(ev_end   * fps_v)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, mid_f)
         ret, frame = cap.read()
-        if ret:
-            frames.append({
-                "image"     : cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
-                "timestamp" : mid_t,
-                "behavior"  : ev["behavior_type"],
-                "confidence": ev["confidence"],
-                "start_time": ev.get("start_time", 0),
-                "end_time"  : ev.get("end_time", 0),
-            })
+        if not ret:
+            continue
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w = rgb.shape[:2]
+        if w > MAX_WIDTH:
+            s = MAX_WIDTH / w
+            rgb = cv2.resize(rgb, (MAX_WIDTH, int(h * s)),
+                             interpolation=cv2.INTER_AREA)
+
+        frames.append({
+            "thumbnail"  : rgb,
+            "timestamp"  : mid_sec,
+            "frame_start": start_f,
+            "frame_end"  : end_f,
+            "behavior"   : ev["behavior_type"],
+            "confidence" : ev["confidence"],
+        })
+
     cap.release()
     return frames
+
+
 
 
 # ─── UI Rendering ─────────────────────────────────────────────────────────────
@@ -848,7 +910,7 @@ def render_sidebar():
         yolo_ready   = YOLO26_DW_V2.exists() or YOLO26_BASE.exists() or YOLO26_PATH.exists()
         models_ready = check_model_exists() and yolo_ready
         if models_ready:
-            st.success("All models loaded ✓")
+            st.success("All models loaded")
         else:
             st.warning("Some models missing — check `models/` folder")
 
@@ -1018,9 +1080,9 @@ def render_analysis_results(results):
         st.markdown('<div class="section-header">Analysis Results</div>', unsafe_allow_html=True)
         st.markdown("""
         <div class='alert-none'>
-            <h2 style='margin:0'>✓ NORMAL — No Persons Detected</h2>
+            <h2 style='margin:0'>NORMAL — No Persons Detected</h2>
         </div>""", unsafe_allow_html=True)
-        st.info(f"⚡ **Fast exit:** {results['early_exit_reason']}")
+        st.info("No persons were detected throughout the video. Classified as normal.")
         vm = results.get("video_metadata", {})
         c1, c2, c3 = st.columns(3)
         c1.metric("Frames Scanned", results["detections"]["frames_processed"])
@@ -1040,7 +1102,6 @@ def render_analysis_results(results):
     is_shop   = lstm["is_shoplifting"]
 
     # ── LSTM Detection Banner ──
-    st.markdown("### LSTM Deep Learning Detection")
     if is_shop and conf > 0.7:
         st.markdown(f"""
         <div class='alert-critical'>
@@ -1127,7 +1188,7 @@ def render_analysis_results(results):
                 counts[bt]["conf_sum"] += e.get("confidence", 0)
             for bt, d in counts.items():
                 avg_c = d["conf_sum"] / d["count"]
-                icon  = "🔴" if bt in {"shoplifting", "concealment"} else "🟡" if bt == "bypass" else "🟢"
+                icon  = "[HIGH]" if bt in {"shoplifting", "concealment"} else "[MED]" if bt == "bypass" else "[OK]"
                 st.markdown(f"{icon} **{bt.capitalize()}**: {d['count']} segment(s), avg confidence: {avg_c:.1%}")
 
     st.markdown("---")
@@ -1200,20 +1261,28 @@ def render_analysis_results(results):
 
     st.markdown("---")
 
-    # ── Forensic Evidence (suspicious frames) ──
+    # ── Forensic Evidence (suspicious clips) ──
     if is_shop:
         st.markdown("### Forensic Evidence")
+        st.caption(
+            "Peak-confidence frames where the model detected shoplifting behaviour. "
+            "Each frame is a distinct moment (≥ 2 s apart). Frame range shows which "
+            "LSTM window triggered the alert."
+        )
         frames = results.get("suspicious_frames", [])
         if frames:
             cols = st.columns(min(len(frames), 4))
             for i, fd in enumerate(frames):
                 with cols[i % 4]:
-                    st.image(fd["image"],
-                             caption=(f"{fd['behavior'].upper()}\n"
-                                      f"t={fd['timestamp']:.1f}s | {fd['confidence']:.0%}"),
-                             use_container_width=True)
+                    if fd.get("thumbnail") is not None:
+                        st.image(fd["thumbnail"], use_container_width=True)
+                    st.caption(
+                        f"**{fd['behavior'].upper()}**  \n"
+                        f"Frames {fd.get('frame_start', '?')} – {fd.get('frame_end', '?')}  \n"
+                        f"t = {fd['timestamp']:.1f}s  |  {fd['confidence']:.0%} confidence"
+                    )
         else:
-            st.info("No suspicious frames extracted (brief or low-confidence segments).")
+            st.info("No high-confidence shoplifting frames found (threshold: 50%).")
         st.markdown("---")
 
     # ── Quality & Fairness ──
@@ -1332,20 +1401,20 @@ def render_pos_audit(analysis_results):
 
     # ── Left: POS Terminal ──────────────────────────────────────────────────
     with col_pos:
-        st.markdown("### 🖥️ Mock POS Terminal")
+        st.markdown("### Mock POS Terminal")
         st.caption("Enter items as they are being rung up at the checkout.")
 
         with st.form("pos_form", clear_on_submit=False):
             sel_name = st.selectbox("Select product", cat_names)
             sel_qty  = st.number_input("Quantity", min_value=1, max_value=20, value=1)
-            add_btn  = st.form_submit_button("➕ Add to Transaction")
+            add_btn  = st.form_submit_button("Add to Transaction")
 
         if add_btn:
             item = dict(cat_by_name[sel_name])
             item["qty"] = int(sel_qty)
             st.session_state.pos_items.append(item)
 
-        if st.button("🗑️ Clear Transaction", key="clear_pos"):
+        if st.button("Clear Transaction", key="clear_pos"):
             st.session_state.pos_items = []
 
         if st.session_state.pos_items:
@@ -1367,36 +1436,72 @@ def render_pos_audit(analysis_results):
         else:
             st.info("No items added yet.")
 
-    # ── Right: Video Evidence ────────────────────────────────────────────────
+    # ── Right: Behavioural Video Evidence ────────────────────────────────────
     with col_vid:
-        st.markdown("### 📹 Video-Detected Products")
-        st.caption("Products the camera saw customers handling during the footage.")
-
-        pickups = analysis_results.get("product_pickups", {}) if analysis_results else {}
-        det     = analysis_results.get("detections", {})      if analysis_results else {}
+        st.markdown("### Behavioural Video Evidence")
+        st.caption(
+            "The behaviour model classifies person actions, not specific products. "
+            "Evidence is based on detected interaction events."
+        )
 
         if not analysis_results:
-            st.info("Run video analysis first to populate detected products.")
-        elif not pickups:
-            st.info("No product interactions detected in the video.")
+            st.info("Run video analysis first.")
         else:
-            vid_rows = []
-            for yolo_cls, count in sorted(pickups.items(),
-                                          key=lambda x: x[1], reverse=True):
-                vid_rows.append({
-                    "Detected Product"  : YOLO_TO_PRODUCT.get(yolo_cls, yolo_cls),
-                    "YOLO Class"        : yolo_cls,
-                    "Person Interactions": count,
-                })
-            st.dataframe(pd.DataFrame(vid_rows), use_container_width=True, hide_index=True)
-            st.caption(
-                f"Total persons tracked: **{det.get('persons_tracked', 0)}**  |  "
-                f"Unique product classes seen: **{det.get('products_detected', 0)}**"
+            det    = analysis_results.get("detections", {})
+            lstm   = analysis_results.get("lstm_detection", {})
+            events = analysis_results.get("behavior_events", [])
+
+            # Count YOLO Picking-Holding detections (item interaction proxy)
+            yolo_pickups = analysis_results.get("product_pickups", {})
+            picking_count = yolo_pickups.get("Picking-Holding", 0)
+
+            # Count LSTM shoplifting windows
+            shop_windows = sum(
+                1 for e in events if e.get("behavior_type") == "shoplifting"
             )
+            susp_windows = sum(
+                1 for e in events
+                if e.get("behavior_type") in {"shoplifting", "Looking around"}
+            )
+
+            vid_rows = [
+                {"Behavioural Signal"     : "Persons tracked",
+                 "Count": det.get("persons_tracked", 0),
+                 "Risk" : "—"},
+                {"Behavioural Signal"     : "Item interaction (Picking-Holding)",
+                 "Count": picking_count,
+                 "Risk" : "Possible" if picking_count > 0 else "—"},
+                {"Behavioural Signal"     : "Suspicious behaviour windows (LSTM)",
+                 "Count": susp_windows,
+                 "Risk" : "High" if susp_windows > 0 else "None"},
+                {"Behavioural Signal"     : "Shoplifting classification windows",
+                 "Count": shop_windows,
+                 "Risk" : "High" if shop_windows > 0 else "None"},
+            ]
+            st.dataframe(pd.DataFrame(vid_rows), use_container_width=True,
+                         hide_index=True)
+            overall = lstm.get("classification", "normal")
+            conf    = lstm.get("confidence", 0.0)
+            if overall == "shoplifting":
+                st.error(
+                    f"LSTM verdict: **SHOPLIFTING** ({conf:.0%}) — "
+                    f"transaction flagged for review."
+                )
+            else:
+                st.success(
+                    f"LSTM verdict: **NORMAL** ({conf:.0%}) — "
+                    f"no shoplifting pattern detected."
+                )
 
     # ── Mismatch Audit ───────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### ⚠️ Mismatch Audit")
+    st.markdown("### Transaction Risk Audit")
+    st.caption(
+        "Since the behaviour model does not identify specific products, the audit "
+        "compares the number of items rung up at POS against the number of "
+        "Picking-Holding interactions and suspicious behaviour windows detected. "
+        "A large gap between items handled and items scanned is a theft indicator."
+    )
 
     if not analysis_results:
         st.info("Run video analysis first.")
@@ -1405,73 +1510,75 @@ def render_pos_audit(analysis_results):
         st.info("Add items to the POS transaction to compare.")
         return
 
-    # Build POS dict: readable_name → qty
-    pos_dict: dict[str, int] = {}
-    for it in st.session_state.pos_items:
-        pos_dict[it["name"]] = pos_dict.get(it["name"], 0) + it["qty"]
-
-    # Build detected dict: readable_name → person_interaction_count
-    det_dict: dict[str, int] = {}
-    for yolo_cls, count in (analysis_results.get("product_pickups") or {}).items():
-        label = YOLO_TO_PRODUCT.get(yolo_cls, yolo_cls)
-        det_dict[label] = det_dict.get(label, 0) + count
-
-    # Collect all product names mentioned in either source
-    all_keys = set(pos_dict.keys()) | set(det_dict.keys())
-    audit_rows = []
-    flags = []
-    for name in sorted(all_keys):
-        pos_q = pos_dict.get(name, 0)
-        det_q = det_dict.get(name, 0)
-        if det_q > pos_q:
-            status = "🔴 NOT RUNG UP"
-            flags.append(f"**{name}**: detected {det_q}× but only {pos_q}× rung up")
-        elif pos_q > det_q and det_q == 0:
-            status = "🟡 NOT SEEN IN VIDEO"
-        else:
-            status = "🟢 OK"
-        audit_rows.append({
-            "Product"       : name,
-            "POS Qty"       : pos_q,
-            "Detected"      : det_q,
-            "Status"        : status,
-        })
-
     import plotly.graph_objects as go
 
-    df_audit = pd.DataFrame(audit_rows)
-    st.dataframe(df_audit, use_container_width=True, hide_index=True)
+    det    = analysis_results.get("detections", {})
+    events = analysis_results.get("behavior_events", [])
+    lstm   = analysis_results.get("lstm_detection", {})
+
+    pos_total_qty  = sum(it["qty"] for it in st.session_state.pos_items)
+    pos_total_val  = sum(it["price"] * it["qty"] for it in st.session_state.pos_items)
+    picking_count  = analysis_results.get("product_pickups", {}).get("Picking-Holding", 0)
+    shop_windows   = sum(1 for e in events if e.get("behavior_type") == "shoplifting")
+    is_shoplifting = lstm.get("is_shoplifting", False)
+
+    # Build audit summary table
+    audit_rows = [
+        {"Metric"   : "POS items scanned",
+         "Value"    : pos_total_qty,
+         "Status"   : "OK"},
+        {"Metric"   : "POS transaction value",
+         "Value"    : f"£{pos_total_val:.2f}",
+         "Status"   : "OK"},
+        {"Metric"   : "Item interactions detected (Picking-Holding)",
+         "Value"    : picking_count,
+         "Status"   : ("More handled than scanned"
+                       if picking_count > pos_total_qty else "OK")},
+        {"Metric"   : "Shoplifting behaviour windows (LSTM)",
+         "Value"    : shop_windows,
+         "Status"   : "Suspicious" if shop_windows > 0 else "None"},
+    ]
+    st.dataframe(pd.DataFrame(audit_rows), use_container_width=True, hide_index=True)
+
+    # Determine overall risk and show flag
+    flags = []
+    if is_shoplifting:
+        flags.append(
+            f"LSTM classified video as **SHOPLIFTING** ({lstm.get('confidence', 0):.0%}) "
+            f"while {pos_total_qty} item(s) were rung up. "
+            "Verify transaction matches items handled."
+        )
+    if picking_count > pos_total_qty:
+        flags.append(
+            f"**{picking_count} item interaction(s)** detected but only "
+            f"**{pos_total_qty} item(s)** scanned at POS — potential scan avoidance."
+        )
+    if is_shoplifting and pos_total_qty == 0:
+        flags.append(
+            "Shoplifting behaviour detected but **no purchase recorded** at POS."
+        )
 
     if flags:
-        st.markdown("#### Potential Theft Flags")
+        st.markdown("#### Potential Theft Indicators")
         for f in flags:
             st.error(f)
-        total_unscanned = sum(
-            r["Detected"] - r["POS Qty"]
-            for r in audit_rows if r["Status"].startswith("🔴")
-        )
-        if total_unscanned > 0:
-            st.warning(
-                f"**{total_unscanned} product interaction(s)** detected by camera "
-                f"but not recorded in POS. This may indicate concealment or "
-                f"checkout bypass. **Human review required.**"
-            )
+        st.warning("**Human review required** before any action is taken.")
     else:
-        st.success("No mismatches found — POS transaction matches video evidence.")
+        st.success("No mismatches found — POS transaction consistent with video evidence.")
 
-    # Bar chart: POS vs detected
-    if len(audit_rows) > 0:
-        fig = go.Figure()
-        labels = [r["Product"] for r in audit_rows]
-        fig.add_bar(name="POS Qty",  x=labels,
-                    y=[r["POS Qty"]  for r in audit_rows], marker_color="#38ef7d")
-        fig.add_bar(name="Detected", x=labels,
-                    y=[r["Detected"] for r in audit_rows], marker_color="#667eea")
-        fig.update_layout(
-            barmode="group", title="POS Transaction vs Video Detection",
-            height=300, margin=dict(l=20, r=20, t=50, b=20),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    # Bar chart: POS items vs item interactions
+    fig = go.Figure()
+    fig.add_bar(name="POS Items Scanned",
+                x=["Transaction"], y=[pos_total_qty], marker_color="#38ef7d")
+    fig.add_bar(name="Item Interactions Detected",
+                x=["Transaction"], y=[picking_count],  marker_color="#667eea")
+    fig.add_bar(name="Shoplifting Windows",
+                x=["Transaction"], y=[shop_windows],   marker_color="#dc3545")
+    fig.update_layout(
+        barmode="group", title="POS vs Behavioural Evidence",
+        height=300, margin=dict(l=20, r=20, t=50, b=20),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ─── Main App ─────────────────────────────────────────────────────────────────
@@ -1487,7 +1594,7 @@ def main():
     render_header()
     render_sidebar()
 
-    tab1, tab2, tab3 = st.tabs(["📊 Model Performance", "🎥 Video Analysis", "🏪 POS Audit"])
+    tab1, tab2, tab3 = st.tabs(["Model Performance", "Video Analysis", "POS Audit"])
 
     with tab1:
         render_model_performance_tab()
@@ -1516,7 +1623,7 @@ def main():
         _, btn_col, _ = st.columns([1, 2, 1])
         with btn_col:
             analyse = st.button(
-                "Analyse Video (YOLO26 + MobileNetV2 + LSTM)",
+                "Analyse Video",
                 type="primary", use_container_width=True,
                 disabled=(uploaded is None)
             )
@@ -1574,7 +1681,7 @@ def main():
                     <p style='color:#ccc;font-size:0.85rem;margin:0;'>
                         {conf:.0%} confidence</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
-                    <p style='color:#888;margin:0;font-size:0.72rem;'>PERSONS TRACKED</p>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>PEOPLE TRACKED</p>
                     <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
                         {stats.get("persons_tracked", 0)}</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
@@ -1614,12 +1721,18 @@ def main():
                     visual_out_path=ann_out_path,
                     live_frame_callback=on_live_frame,
                 )
-                if results.get("success"):
-                    results["suspicious_frames"] = extract_suspicious_frames(
-                        video_path, results.get("behavior_events", []), max_frames=4
-                    )
             except Exception as e:
                 results = {"success": False, "error": str(e)}
+
+            # Extract forensic GIF clips separately so a clip-extraction failure
+            # never wipes out the main analysis results.
+            if results.get("success"):
+                try:
+                    results["suspicious_frames"] = extract_suspicious_clips(
+                        video_path, results.get("behavior_events", []), max_clips=4
+                    )
+                except Exception:
+                    results["suspicious_frames"] = []
 
             # Clear live preview widgets
             _frame_ph.empty()
@@ -1639,8 +1752,9 @@ def main():
                 except OSError:
                     pass
 
-            st.session_state.analysis_results   = results
+            st.session_state.analysis_results    = results
             st.session_state.annotated_video_path = ann_out_path
+            st.rerun()   # force a clean rerender so results section renders fresh
 
         if st.session_state.analysis_results:
             # ── Annotated video player ──────────────────────────────────────
@@ -1649,14 +1763,23 @@ def main():
                 st.markdown("---")
                 st.markdown("### Annotated Analysis Video")
                 st.caption(
-                    "Replay with YOLO detections (green = person, orange = product), "
-                    "live BiLSTM classification badge, and per-frame stats."
+                    "Replay with YOLO behaviour labels and BiLSTM classification badge. "
+                    "Green = normal · Orange = Looking around · Red = Shoplifting"
                 )
                 with open(ann_vid, "rb") as _vf:
                     st.video(_vf.read())
 
             st.markdown("---")
-            render_analysis_results(st.session_state.analysis_results)
+            r = st.session_state.analysis_results
+            if not r.get("success", False):
+                st.error(f"Analysis failed: {r.get('error', 'Unknown error')}")
+            else:
+                try:
+                    render_analysis_results(r)
+                except Exception as _render_err:
+                    st.error(f"Report render error: {_render_err}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
     with tab3:
         render_pos_audit(st.session_state.analysis_results)
