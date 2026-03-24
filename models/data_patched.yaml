@@ -4,7 +4,7 @@ names:
 - normal
 - shoplifting
 nc: 4
-path: C:\Users\MSI\Music\Project_DigitalWitness\data\dataset
+path: D:\Santosh\Project_DigitalWitness\Data\dataset
 roboflow:
   license: CC BY 4.0
   project: shoplitingvideo-handpocket

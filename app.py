@@ -494,6 +494,39 @@ def run_pipeline(video_path, progress_callback=None,
         if real_person_count > max_concurrent_persons:
             max_concurrent_persons = real_person_count
 
+        # ── Current-frame YOLO signal (used for live badge priority) ──────────
+        # If YOLO detects "shoplifting" or "Looking around" in this frame the
+        # badge should reflect that immediately — the BiLSTM needs 45 frames of
+        # history before it can output a verdict, so YOLO acts as the early
+        # warning while LSTM provides the confirmed temporal classification.
+        frame_yolo_label = None
+        frame_yolo_conf  = 0.0
+        if results.boxes is not None and IS_4CLS_MODEL:
+            for _cls_v, _cof_v in zip(results.boxes.cls.cpu().numpy(),
+                                       results.boxes.conf.cpu().numpy()):
+                _cn = yolo_model.names[int(_cls_v)]
+                if _cn == "shoplifting":
+                    if float(_cof_v) > frame_yolo_conf:
+                        frame_yolo_label = "shoplifting"
+                        frame_yolo_conf  = float(_cof_v)
+                elif _cn == "Looking around" and frame_yolo_label != "shoplifting":
+                    if float(_cof_v) > frame_yolo_conf:
+                        frame_yolo_label = "Looking around"
+                        frame_yolo_conf  = float(_cof_v)
+
+        # Choose badge: YOLO live detection takes priority over LSTM when YOLO
+        # sees something suspicious; otherwise fall back to LSTM temporal verdict.
+        _SUSP = {"shoplifting", "Looking around"}
+        if frame_yolo_label in _SUSP:
+            badge_label = frame_yolo_label
+            badge_conf  = frame_yolo_conf
+        elif last_live_label:
+            badge_label = last_live_label
+            badge_conf  = last_live_conf
+        else:
+            badge_label = None
+            badge_conf  = 0.0
+
         # ── Frame annotation (visual output + live preview) ───────────────────
         if video_writer or live_frame_callback:
             ann = frame.copy()
@@ -528,10 +561,13 @@ def run_pipeline(video_path, progress_callback=None,
                                   col_v, -1)
                     cv2.putText(ann, lbl_v, (x1 + 4, lbl_y - 2),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-            # Draw classification badge (last known BiLSTM verdict)
-            if last_live_label:
-                b_col = (0, 50, 200) if last_live_label == "shoplifting" else (20, 140, 20)
-                b_txt = f"{last_live_label.upper()}  {last_live_conf:.0%}"
+            # Draw classification badge - YOLO live signal takes priority,
+            # falls back to LSTM temporal verdict once sequence is long enough.
+            if badge_label:
+                b_col = ((0, 0, 200)   if badge_label == "shoplifting" else
+                         (0, 140, 255) if badge_label == "Looking around" else
+                         (20, 140, 20))
+                b_txt = f"{badge_label.upper()}  {badge_conf:.0%}"
                 (tw_b, th_b), _ = cv2.getTextSize(b_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
                 cv2.rectangle(ann, (8, 8), (tw_b + 18, th_b + 22), b_col, -1)
                 cv2.putText(ann, b_txt, (12, th_b + 16),
@@ -545,14 +581,14 @@ def run_pipeline(video_path, progress_callback=None,
             # Live callback every _live_step frames
             if live_frame_callback and frame_num % _live_step == 0:
                 ann_rgb = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
-                tl_color = ("red"  if last_live_label == "shoplifting" else
-                             "green" if last_live_label == "normal" else "gray")
+                tl_color = ("red"   if badge_label in {"shoplifting", "Looking around"} else
+                             "green" if badge_label == "normal" else "gray")
                 live_timeline.append(tl_color)
                 live_frame_callback(ann_rgb, frame_num, total_f, {
                     "persons_tracked"  : max_concurrent_persons,
                     "products_detected": len({cls for (_, cls) in product_pickup_events}),
-                    "label"            : last_live_label or "Analyzing...",
-                    "conf"             : last_live_conf,
+                    "label"            : badge_label or "Analyzing...",
+                    "conf"             : badge_conf,
                     "timeline"         : list(live_timeline),
                 })
 
@@ -1147,8 +1183,8 @@ def render_analysis_results(results):
     st.markdown("### Detection Statistics")
     det = results.get("detections", {})
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Persons in Scene",    det.get("persons_tracked", 0))
-    c2.metric("Products Interacted", det.get("products_detected", 0))
+    c1.metric("People Interacted with products",    det.get("persons_tracked", 0))
+    c2.metric("PICKED UP PRODUCTS", det.get("products_detected", 0))
     c3.metric("Interactions",     det.get("interactions", 0))
     c4.metric("Frames Processed", det.get("frames_processed", 0))
     st.markdown("---")
@@ -1681,11 +1717,11 @@ def main():
                     <p style='color:#ccc;font-size:0.85rem;margin:0;'>
                         {conf:.0%} confidence</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
-                    <p style='color:#888;margin:0;font-size:0.72rem;'>PEOPLE TRACKED</p>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>SUSPICIOUS PEOPLE</p>
                     <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
                         {stats.get("persons_tracked", 0)}</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
-                    <p style='color:#888;margin:0;font-size:0.72rem;'>PRODUCTS DETECTED</p>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>PICKED UP PRODUCTS </p>
                     <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
                         {stats.get("products_detected", 0)}</p>
                 </div>""", unsafe_allow_html=True)
