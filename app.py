@@ -339,7 +339,7 @@ def run_pipeline(video_path, progress_callback=None,
     PRODUCT_CLS    = {"Picking-Holding"}
 
     def _early_exit_normal(reason, f_num, f_total, fps, w, h):
-        """Return a lightweight 'normal / no person' result without running BiLSTM."""
+        """Return a lightweight normal result when video is too short to run BiLSTM."""
         return {
             "success"       : True,
             "early_exit"    : True,
@@ -393,6 +393,7 @@ def run_pipeline(video_path, progress_callback=None,
     # product pickup: set of (person_track_id, product_class) — one entry per
     # unique person×product pair that were in close proximity
     product_pickup_events = set()
+    yolo_shop_confs = []   # per-frame peak YOLO shoplifting confidence (IS_4CLS only)
     frame_num    = 0
     feat_step    = 4   # extract CNN features every 4th frame (speed)
     yolo_step    = 2   # run YOLO every 2nd frame; reuse last result otherwise
@@ -514,6 +515,10 @@ def run_pipeline(video_path, progress_callback=None,
                         frame_yolo_label = "Looking around"
                         frame_yolo_conf  = float(_cof_v)
 
+        # Accumulate YOLO shoplifting confidence for final classification
+        if frame_yolo_label == "shoplifting":
+            yolo_shop_confs.append(frame_yolo_conf)
+
         # Choose badge: YOLO live detection takes priority over LSTM when YOLO
         # sees something suspicious; otherwise fall back to LSTM temporal verdict.
         _SUSP = {"shoplifting", "Looking around"}
@@ -622,20 +627,12 @@ def run_pipeline(video_path, progress_callback=None,
                     _log, _ = bilstm_model(_xt)
                     _prb    = torch.softmax(_log / 3.0, dim=1).cpu().numpy()[0]
                 last_live_label = lstm_classes[int(np.argmax(_prb))]
-                last_live_conf  = min(float(np.max(_prb)) * 0.85, 0.82)
+                last_live_conf  = min(float(np.max(_prb)), 0.99)
 
     if video_writer:
         video_writer.release()
     cap.release()
     duration = frame_num / fps_val
-
-    # ── Edge case: no persons in entire video ──
-    if not persons_set:
-        _cb(1.0, "No persons detected — returning normal.")
-        return _early_exit_normal(
-            "No person detected across the entire video. Classified as normal.",
-            frame_num, total_f, fps_val, width, height,
-        )
 
     # ── Edge case: video too short — no features collected ──
     if not all_feats:
@@ -666,9 +663,10 @@ def run_pipeline(video_path, progress_callback=None,
         with torch.no_grad():
             logits, _ = bilstm_model(x_t)
         # T=3.0 temperature scaling: divides logits before softmax to flatten
-        # overconfident distributions. The *0.85 scale factor further prevents
-        # near-certain outputs — an untrained/overfit model should never claim
-        # certainty. Sequence-length scale penalises very short clips.
+        # overconfident distributions, giving natural variation in output values.
+        # Sequence-length scale penalises very short clips.
+        # Hard cap at 0.99 only — prevents displaying a literal "100%" but
+        # never artificially compresses results to a fixed ceiling.
         TEMP = 3.0
         probs    = torch.softmax(logits / TEMP, dim=1).cpu().numpy()[0]
         scale    = min(1.0, len(all_feats) / LSTM_SEQ_LEN)
@@ -677,7 +675,7 @@ def run_pipeline(video_path, progress_callback=None,
             "start"        : 0.0,
             "end"          : duration,
             "behavior_type": lstm_classes[int(np.argmax(probs))],
-            "confidence"   : min(raw_conf * 0.85, 0.82),
+            "confidence"   : min(raw_conf, 0.99),
             "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
         })
     else:
@@ -691,23 +689,52 @@ def run_pipeline(video_path, progress_callback=None,
                 "start"        : start / fps_val,
                 "end"          : (start + LSTM_SEQ_LEN) / fps_val,
                 "behavior_type": lstm_classes[int(np.argmax(probs))],
-                "confidence"   : min(float(np.max(probs)) * 0.85, 0.82),
+                "confidence"   : min(float(np.max(probs)), 0.99),
                 "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
             })
 
     _cb(0.85, "Aggregating predictions...")
 
-    # Weighted aggregation (2× weight for shoplifting)
     shop_preds = [p for p in predictions if p["behavior_type"] == "shoplifting"]
     norm_preds = [p for p in predictions if p["behavior_type"] == "normal"]
-    shop_w = sum(p["confidence"] for p in shop_preds) * 2.0
-    norm_w = sum(p["confidence"] for p in norm_preds)
-    total_w = shop_w + norm_w
 
-    if total_w > 0 and shop_w / total_w > 0.3 and shop_preds:
-        best          = max(shop_preds, key=lambda p: p["confidence"])
+    # Priority aggregation:
+    # If ANY window shows shoplifting at >= SHOP_MIN_CONF that is the final result.
+    # A few seconds of normal behaviour at the end of a video cannot override
+    # sustained high-confidence shoplifting detected earlier in the footage.
+    #
+    # YOLO override: the YOLO model flags behaviour per-frame before the LSTM
+    # has enough history. If YOLO repeatedly detected shoplifting at high
+    # confidence, trust that signal even when the LSTM says normal.
+    SHOP_MIN_CONF  = 0.55
+    peak_shop_conf = max((p["confidence"] for p in shop_preds), default=0.0)
+    yolo_peak      = max(yolo_shop_confs, default=0.0)
+    yolo_mean      = (sum(yolo_shop_confs) / len(yolo_shop_confs)
+                      if yolo_shop_confs else 0.0)
+    yolo_override  = (yolo_peak >= 0.60 or
+                      (yolo_mean >= 0.50 and len(yolo_shop_confs) >= 3))
+
+    if yolo_override or peak_shop_conf >= SHOP_MIN_CONF:
+        # Use YOLO peak confidence when it's higher than the LSTM's best window
+        best          = max(shop_preds, key=lambda p: p["confidence"]) if shop_preds else None
         overall_class = "shoplifting"
-        overall_conf  = best["confidence"]
+        overall_conf  = max(
+            best["confidence"] if best else 0.0,
+            min(yolo_peak, 0.99)
+        )
+    elif shop_preds:
+        # Below threshold but some shoplifting windows exist — use weight ratio
+        shop_w  = sum(p["confidence"] for p in shop_preds) * 2.0
+        norm_w  = sum(p["confidence"] for p in norm_preds)
+        total_w = shop_w + norm_w
+        if total_w > 0 and shop_w / total_w > 0.3:
+            best          = max(shop_preds, key=lambda p: p["confidence"])
+            overall_class = "shoplifting"
+            overall_conf  = best["confidence"]
+        else:
+            overall_class = "normal"
+            overall_conf  = (np.mean([p["confidence"] for p in norm_preds])
+                             if norm_preds else 0.5)
     else:
         overall_class = "normal"
         overall_conf  = (np.mean([p["confidence"] for p in norm_preds])
@@ -829,19 +856,26 @@ def run_pipeline(video_path, progress_callback=None,
 
 def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
     """
-    Extract up to max_clips distinct static frame snapshots from the highest-
-    confidence shoplifting windows.  Frames must be at least 2 s apart so
-    overlapping LSTM windows never produce duplicate images.
+    Extract up to max_clips animated GIF clips of the shoplifting portions of
+    the video.  Each clip covers the exact detected window plus 1 s padding on
+    each side so reviewers can see the moment in context.
 
-    Returns a list of dicts (one per unique moment):
-        thumbnail   : ndarray (RGB) — the captured frame
-        timestamp   : float  — mid-point of the window in seconds
+    Deduplication: windows whose midpoints are < 2 s apart are collapsed to the
+    highest-confidence one, preventing multiple nearly-identical clips.
+
+    Returns a list of dicts:
+        gif_bytes   : bytes  — animated GIF (auto-plays in st.image)
+        thumbnail   : ndarray (RGB) — first frame, used as static preview
+        timestamp   : float  — mid-point in seconds
         frame_start : int    — first frame number of the window
         frame_end   : int    — last frame number of the window
+        clip_start  : float  — clip start in seconds (with padding)
+        clip_end    : float  — clip end in seconds (with padding)
         behavior    : str
         confidence  : float
     """
-    import cv2
+    import cv2, io
+    from PIL import Image
 
     suspicious = [
         e for e in behavior_events
@@ -852,8 +886,7 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
     if not suspicious:
         return []
 
-    # Sort by confidence descending; keep only events whose midpoint is
-    # at least 2 s away from every already-selected event.
+    # Sort by confidence, deduplicate by 2 s minimum gap between midpoints
     suspicious = sorted(suspicious, key=lambda x: x.get("confidence", 0), reverse=True)
     selected, selected_mids = [], []
     for ev in suspicious:
@@ -871,42 +904,69 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
     if not cap.isOpened():
         return []
 
-    fps_v   = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    MAX_WIDTH = 640
-    frames = []
+    fps_v    = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_f  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_s  = total_f / fps_v
+    GIF_FPS  = 8                             # output frame rate — smooth enough, small file
+    STEP     = max(1, int(fps_v / GIF_FPS))  # read every Nth source frame
+    PAD      = 1.0                           # 1 s padding around each window
+    MAX_W    = 480                           # max width for GIF frames
 
+    clips = []
     for ev in selected:
-        ev_start = ev.get("start_time", 0)
-        ev_end   = ev.get("end_time", ev_start + 1)
-        mid_sec  = (ev_start + ev_end) / 2
-        mid_f    = max(0, min(total_f - 1, int(mid_sec * fps_v)))
-        start_f  = int(ev_start * fps_v)
-        end_f    = int(ev_end   * fps_v)
+        ev_start   = ev.get("start_time", 0)
+        ev_end     = ev.get("end_time", ev_start + 1)
+        clip_start = max(0.0,    ev_start - PAD)
+        clip_end   = min(total_s, ev_end  + PAD)
+        start_f    = int(clip_start * fps_v)
+        end_f      = int(clip_end   * fps_v)
 
-        cap.set(cv2.CAP_PROP_POS_FRAMES, mid_f)
-        ret, frame = cap.read()
-        if not ret:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
+        pil_frames = []
+        thumbnail  = None
+        src_f      = start_f
+
+        while src_f <= end_f:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if (src_f - start_f) % STEP == 0:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                if w > MAX_W:
+                    s   = MAX_W / w
+                    rgb = cv2.resize(rgb, (MAX_W, int(h * s)),
+                                     interpolation=cv2.INTER_AREA)
+                pil_frames.append(Image.fromarray(rgb))
+                if thumbnail is None:
+                    thumbnail = rgb
+            src_f += 1
+
+        if not pil_frames:
             continue
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w = rgb.shape[:2]
-        if w > MAX_WIDTH:
-            s = MAX_WIDTH / w
-            rgb = cv2.resize(rgb, (MAX_WIDTH, int(h * s)),
-                             interpolation=cv2.INTER_AREA)
+        buf = io.BytesIO()
+        pil_frames[0].save(
+            buf, format="GIF", save_all=True,
+            append_images=pil_frames[1:],
+            duration=int(1000 / GIF_FPS),
+            loop=0, optimize=True,
+        )
 
-        frames.append({
-            "thumbnail"  : rgb,
-            "timestamp"  : mid_sec,
-            "frame_start": start_f,
-            "frame_end"  : end_f,
+        clips.append({
+            "gif_bytes"  : buf.getvalue(),
+            "thumbnail"  : thumbnail,
+            "timestamp"  : (ev_start + ev_end) / 2,
+            "frame_start": int(ev_start * fps_v),
+            "frame_end"  : int(ev_end   * fps_v),
+            "clip_start" : clip_start,
+            "clip_end"   : clip_end,
             "behavior"   : ev["behavior_type"],
             "confidence" : ev["confidence"],
         })
 
     cap.release()
-    return frames
+    return clips
 
 
 
@@ -1111,19 +1171,18 @@ def render_analysis_results(results):
 
     import plotly.graph_objects as go
 
-    # ── Early-exit banner ──
+    # ── Early-exit banner (video too short only) ──
     if results.get("early_exit"):
         st.markdown('<div class="section-header">Analysis Results</div>', unsafe_allow_html=True)
         st.markdown("""
         <div class='alert-none'>
-            <h2 style='margin:0'>NORMAL — No Persons Detected</h2>
+            <h2 style='margin:0'>NORMAL — No Suspicious Activity Detected</h2>
         </div>""", unsafe_allow_html=True)
-        st.info("No persons were detected throughout the video. Classified as normal.")
+        st.info(results.get("early_exit_reason", "Video too short for temporal classification."))
         vm = results.get("video_metadata", {})
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         c1.metric("Frames Scanned", results["detections"]["frames_processed"])
-        c2.metric("Persons Detected", 0)
-        c3.metric("Duration", f"{vm.get('duration', 0):.1f}s")
+        c2.metric("Duration", f"{vm.get('duration', 0):.1f}s")
         return
 
     if not results.get("model_trained", True):
@@ -1183,7 +1242,7 @@ def render_analysis_results(results):
     st.markdown("### Detection Statistics")
     det = results.get("detections", {})
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("People Interacted with products",    det.get("persons_tracked", 0))
+    c1.metric("PEOPLE INTERACTED WITH THE PRODUCTS",    det.get("persons_tracked", 0))
     c2.metric("PICKED UP PRODUCTS", det.get("products_detected", 0))
     c3.metric("Interactions",     det.get("interactions", 0))
     c4.metric("Frames Processed", det.get("frames_processed", 0))
@@ -1301,24 +1360,26 @@ def render_analysis_results(results):
     if is_shop:
         st.markdown("### Forensic Evidence")
         st.caption(
-            "Peak-confidence frames where the model detected shoplifting behaviour. "
-            "Each frame is a distinct moment (≥ 2 s apart). Frame range shows which "
-            "LSTM window triggered the alert."
+            "Animated clips extracted from the shoplifting window (+ 1 s context). "
+            "Each clip is a distinct moment at least 2 s apart — no duplicates."
         )
-        frames = results.get("suspicious_frames", [])
-        if frames:
-            cols = st.columns(min(len(frames), 4))
-            for i, fd in enumerate(frames):
+        clips = results.get("suspicious_frames", [])
+        if clips:
+            cols = st.columns(min(len(clips), 4))
+            for i, fd in enumerate(clips):
                 with cols[i % 4]:
-                    if fd.get("thumbnail") is not None:
+                    if fd.get("gif_bytes"):
+                        st.image(fd["gif_bytes"], use_container_width=True)
+                    elif fd.get("thumbnail") is not None:
                         st.image(fd["thumbnail"], use_container_width=True)
                     st.caption(
                         f"**{fd['behavior'].upper()}**  \n"
                         f"Frames {fd.get('frame_start', '?')} – {fd.get('frame_end', '?')}  \n"
-                        f"t = {fd['timestamp']:.1f}s  |  {fd['confidence']:.0%} confidence"
+                        f"{fd.get('clip_start', 0):.1f}s – {fd.get('clip_end', 0):.1f}s  "
+                        f"|  {fd['confidence']:.0%} confidence"
                     )
         else:
-            st.info("No high-confidence shoplifting frames found (threshold: 50%).")
+            st.info("No high-confidence shoplifting clips found (threshold: 50%).")
         st.markdown("---")
 
     # ── Quality & Fairness ──
@@ -1717,7 +1778,7 @@ def main():
                     <p style='color:#ccc;font-size:0.85rem;margin:0;'>
                         {conf:.0%} confidence</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
-                    <p style='color:#888;margin:0;font-size:0.72rem;'>SUSPICIOUS PEOPLE</p>
+                    <p style='color:#888;margin:0;font-size:0.72rem;'>PEOPLE INTERACTED WITH THE PRODUCTS</p>
                     <p style='color:#fff;font-size:1.1rem;font-weight:700;margin:0.2rem 0;'>
                         {stats.get("persons_tracked", 0)}</p>
                     <hr style='border-color:#333;margin:0.6rem 0;'>
