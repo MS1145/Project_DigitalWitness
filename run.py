@@ -3,8 +3,7 @@ import subprocess
 
 
 def main():
-    print("\n DIGITAL WITNESS")
-    print("  Retail Security Assistant")
+    print("\n DIGITAL WITNESS - Retail Security Assistant")
 
     try:
         subprocess.run([

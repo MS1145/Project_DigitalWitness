@@ -761,6 +761,14 @@ def run_pipeline(video_path, progress_callback=None,
     raw_score = 0.50 * s_conceal + 0.35 * s_bypass + 0.15 * s_dur
     raw_score = max(0.0, min(1.0, raw_score))
 
+    # When shoplifting was definitively detected (YOLO override or LSTM) but
+    # the LSTM windows were all "normal" so s_conceal/s_bypass came out zero,
+    # floor the risk score against the detection confidence so the risk tier
+    # matches the classification banner.
+    if overall_class == "shoplifting" and raw_score < 0.3:
+        raw_score = max(raw_score, overall_conf * 0.75)
+        raw_score = max(0.0, min(1.0, raw_score))
+
     if raw_score < 0.3:    severity = "NONE"
     elif raw_score < 0.5:  severity = "LOW"
     elif raw_score < 0.7:  severity = "MEDIUM"
@@ -971,6 +979,26 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
 
 
 
+# ─── Forensic clip modal ──────────────────────────────────────────────────────
+@st.dialog("Forensic Evidence", width="large")
+def _show_clip_modal():
+    clip = st.session_state.get("_modal_clip")
+    if not clip:
+        return
+    behavior = clip.get("behavior", "unknown").upper()
+    conf     = clip.get("confidence", 0)
+    st.markdown(f"**Detected behaviour:** {behavior} — {conf:.0%} confidence")
+    st.caption(
+        f"Timestamp: {clip.get('clip_start', 0):.1f}s – {clip.get('clip_end', 0):.1f}s  "
+        f"|  Frames {clip.get('frame_start', '?')} – {clip.get('frame_end', '?')}"
+    )
+    if clip.get("gif_bytes"):
+        st.image(clip["gif_bytes"], use_container_width=True)
+    elif clip.get("thumbnail") is not None:
+        st.image(clip["thumbnail"], use_container_width=True)
+    st.warning("Advisory evidence only. Human review required before any action is taken.")
+
+
 # ─── UI Rendering ─────────────────────────────────────────────────────────────
 
 def render_header():
@@ -1014,103 +1042,177 @@ def render_sidebar():
         st.markdown("### Important Notice")
         st.info("This is an **advisory system**.\nAll alerts require human validation.\nThe system does NOT determine guilt.")
         st.markdown("---")
-        st.markdown("##### Final Year Project — 2026")
+        st.markdown("##### IIT 2026 Final Year Project Santosh_Manoharadas_20220967_w1954095")
 
 
 def render_model_performance_tab():
-    bilstm_info   = load_model_metrics()
+    bilstm_info    = load_model_metrics()
     mobilenet_info = load_mobilenet_metrics()
 
-    if not bilstm_info and not mobilenet_info:
-        st.warning("No model metrics found. Train the models first using the notebook.")
-        return
+    OUTPUTS_DIR = ROOT_DIR / "outputs"
+    CASES_DIR   = ROOT_DIR / "outputs" / "cases"
+    YOLO_RUN    = ROOT_DIR / "runs" / "yolo_ft" / "exp"
+
+    def _img(path, caption=None):
+        p = Path(path)
+        if p.exists():
+            st.image(str(p), caption=caption, use_container_width=True)
 
     st.markdown('<div class="section-header">Deep Learning Model Performance</div>',
                 unsafe_allow_html=True)
 
-    # ── MobileNetV2 evaluation metrics (computed on held-out val set) ──────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 1 — MobileNetV2
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("### MobileNetV2 — Frame Feature Extractor")
+    st.caption("Fine-tuned on retail surveillance frames. Extracts 1280-dim spatial features per frame fed to the BiLSTM.")
+
     mn   = mobilenet_info or {}
     mn_m = mn.get("metrics", {})
-    st.markdown("### MobileNetV2 Frame Classifier — Evaluation Results")
-    st.caption(f"Evaluated on {mn.get('n_val_samples', 0):,} held-out validation frames (20% stratified split)")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Accuracy",  f"{mn_m.get('accuracy',  mn.get('best_val_acc', 0)):.2%}")
     c2.metric("Precision", f"{mn_m.get('precision', 0):.2%}")
     c3.metric("Recall",    f"{mn_m.get('recall',    0):.2%}")
     c4.metric("F1 Score",  f"{mn_m.get('f1_score',  0):.2%}")
+    st.caption(f"Evaluated on {mn.get('n_val_samples', 0):,} held-out validation frames (20% stratified split)")
 
-    per_class = mn.get("per_class_metrics", {})
-    if per_class:
-        st.markdown("#### Per-Class Metrics")
-        classes = mn.get("classes", ["normal", "shoplifting"])
+    per_class_mn = mn.get("per_class_metrics", {})
+    if per_class_mn:
+        classes_mn = mn.get("classes", ["normal", "shoplifting"])
         rows = [{"Class"    : c.capitalize(),
-                 "Precision": f"{per_class.get('precision', {}).get(c, 0):.2%}",
-                 "Recall"   : f"{per_class.get('recall',    {}).get(c, 0):.2%}",
-                 "F1 Score" : f"{per_class.get('f1',        {}).get(c, 0):.2%}",
-                 "Support"  : per_class.get('support', {}).get(c, 0)}
-                for c in classes]
+                 "Precision": f"{per_class_mn.get('precision', {}).get(c, 0):.2%}",
+                 "Recall"   : f"{per_class_mn.get('recall',    {}).get(c, 0):.2%}",
+                 "F1 Score" : f"{per_class_mn.get('f1',        {}).get(c, 0):.2%}",
+                 "Support"  : per_class_mn.get('support', {}).get(c, 0)}
+                for c in classes_mn]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    # ── BiLSTM val accuracy ────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### BiLSTM + Attention Sequence Classifier — Validation Accuracy")
-    st.caption("Best validation accuracy recorded during training (frame-sequence level)")
-    if bilstm_info:
-        lstm_acc = bilstm_info.get("best_val_acc", 0)
-        c1, c2 = st.columns(2)
-        c1.metric("Best Validation Accuracy", f"{lstm_acc:.2%}")
-        c2.metric("Val Sequences", bilstm_info.get("n_val_samples", "N/A"))
-    # ── Confusion matrix + learning curve ─────────────────────────────────────
-    st.markdown("---")
-    _cm_path  = ROOT_DIR / "outputs" / "confusion_matrix.png"
-    _lc_path  = ROOT_DIR / "outputs" / "learning_curve.png"
-    has_cm = _cm_path.exists()
-    has_lc = _lc_path.exists()
+    col1, col2 = st.columns(2)
+    with col1:
+        _img(CASES_DIR / "mobilenet_confusion_matrix.png", "MobileNetV2 — Confusion Matrix")
+    with col2:
+        _img(CASES_DIR / "mobilenet_metrics_bar.png", "MobileNetV2 — Per-Class Metrics Bar")
 
-    if has_cm and has_lc:
+    # Fallback legacy paths
+    _cm_path = OUTPUTS_DIR / "confusion_matrix.png"
+    _lc_path = OUTPUTS_DIR / "learning_curve.png"
+    if _cm_path.exists() or _lc_path.exists():
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("### Confusion Matrix")
-            st.image(str(_cm_path), use_container_width=True)
+            _img(_cm_path, "Confusion Matrix")
         with col2:
-            st.markdown("### Training Learning Curve")
-            st.image(str(_lc_path), use_container_width=True)
-    elif has_cm:
-        st.markdown("### Confusion Matrix")
-        st.image(str(_cm_path), use_container_width=True)
-    elif has_lc:
-        st.markdown("### Training Learning Curve")
-        st.image(str(_lc_path), use_container_width=True)
-    elif "confusion_matrix" in (bilstm_info or {}):
+            _img(_lc_path, "Learning Curve")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 2 — BiLSTM
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### BiLSTM + Attention — Temporal Sequence Classifier")
+    st.caption("Classifies 45-frame sequences (7.5 s windows) of MobileNetV2 features as normal or shoplifting.")
+
+    if bilstm_info:
+        n_val = bilstm_info.get("n_val_samples")
+        if n_val is not None:
+            c1, c2 = st.columns(2)
+            c1.metric("Best Validation Accuracy", f"{bilstm_info.get('best_val_acc', 0):.2%}")
+            c2.metric("Validation Sequences", n_val)
+        else:
+            st.metric("Best Validation Accuracy", f"{bilstm_info.get('best_val_acc', 0):.2%}")
+
+    per_class_lstm = (bilstm_info or {}).get("per_class_metrics", {})
+    if per_class_lstm:
+        classes_lstm = (bilstm_info or {}).get("classes", ["normal", "shoplifting"])
+        rows = [{"Class"    : c.capitalize(),
+                 "Precision": f"{per_class_lstm.get('precision', {}).get(c, 0):.1%}",
+                 "Recall"   : f"{per_class_lstm.get('recall',    {}).get(c, 0):.1%}",
+                 "F1 Score" : f"{per_class_lstm.get('f1',        {}).get(c, 0):.1%}"}
+                for c in classes_lstm]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # Plotly fallback if no PNG available
+    if not (CASES_DIR / "bilstm_confusion_matrix.png").exists() and "confusion_matrix" in (bilstm_info or {}):
         import plotly.graph_objects as go
-        st.markdown("### Confusion Matrix")
-        cm = np.array(bilstm_info["confusion_matrix"])
+        cm      = np.array(bilstm_info["confusion_matrix"])
         classes = bilstm_info.get("classes", ["normal", "shoplifting"])
         fig = go.Figure(data=go.Heatmap(
             z=cm, x=classes, y=classes, colorscale="Blues",
             text=cm, texttemplate="%{text}", textfont={"size": 20},
         ))
-        fig.update_layout(
-            title="Predicted vs Actual",
-            xaxis_title="Predicted", yaxis_title="True",
-            height=350, margin=dict(l=20, r=20, t=50, b=20)
-        )
+        fig.update_layout(title="BiLSTM — Predicted vs Actual",
+                          xaxis_title="Predicted", yaxis_title="True",
+                          height=350, margin=dict(l=20, r=20, t=50, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
-    # ── Per-class metrics table ────────────────────────────────────────────────
-    per_class = (bilstm_info or {}).get("per_class_metrics", {})
-    if per_class:
-        st.markdown("---")
-        st.markdown("### Per-Class Metrics")
-        classes = (bilstm_info or {}).get("classes", ["normal", "shoplifting"])
-        rows = [{"Class": c.capitalize(),
-                 "Precision": f"{per_class.get('precision', {}).get(c, 0):.1%}",
-                 "Recall"   : f"{per_class.get('recall',    {}).get(c, 0):.1%}",
-                 "F1 Score" : f"{per_class.get('f1',        {}).get(c, 0):.1%}"}
-                for c in classes]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        _img(CASES_DIR / "bilstm_confusion_matrix.png", "BiLSTM — Confusion Matrix")
+    with col2:
+        _img(CASES_DIR / "bilstm_summary.png", "BiLSTM — Training Summary")
 
-    # ── Model architecture & training config ──────────────────────────────────
+    _img(CASES_DIR / "attention_xai_example.png",
+         "Temporal Attention — which frames in the 45-frame window drove the classification")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 3 — YOLO26 Training Results
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### YOLO26 — 4-Class Behaviour Detector Training Results")
+    st.caption("Fine-tuned on 13,252 annotated frames. Classes: Looking around, Picking-Holding, normal, shoplifting.")
+
+    _img(YOLO_RUN / "results.png",
+         "YOLO26 Training — Box Loss, Class Loss, mAP50, mAP50-95 across epochs")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _img(YOLO_RUN / "BoxPR_curve.png", "Precision-Recall Curve")
+    with col2:
+        _img(YOLO_RUN / "BoxF1_curve.png", "F1-Confidence Curve")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _img(YOLO_RUN / "BoxP_curve.png", "Precision-Confidence Curve")
+    with col2:
+        _img(YOLO_RUN / "BoxR_curve.png", "Recall-Confidence Curve")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _img(YOLO_RUN / "confusion_matrix.png", "Confusion Matrix (raw counts)")
+    with col2:
+        _img(YOLO_RUN / "confusion_matrix_normalized.png", "Confusion Matrix (normalised)")
+
+    _img(YOLO_RUN / "labels.jpg", "Dataset — Class Distribution and Bounding Box Layout")
+
+    with st.expander("Validation Batch Samples — Ground Truth vs Predictions"):
+        col1, col2 = st.columns(2)
+        with col1:
+            _img(YOLO_RUN / "val_batch0_labels.jpg", "Val Batch 0 — Ground Truth")
+            _img(YOLO_RUN / "val_batch1_labels.jpg", "Val Batch 1 — Ground Truth")
+            _img(YOLO_RUN / "val_batch2_labels.jpg", "Val Batch 2 — Ground Truth")
+        with col2:
+            _img(YOLO_RUN / "val_batch0_pred.jpg",   "Val Batch 0 — Predictions")
+            _img(YOLO_RUN / "val_batch1_pred.jpg",   "Val Batch 1 — Predictions")
+            _img(YOLO_RUN / "val_batch2_pred.jpg",   "Val Batch 2 — Predictions")
+
+    with st.expander("Training Batch Samples"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            _img(YOLO_RUN / "train_batch0.jpg", "Train Batch 0")
+        with col2:
+            _img(YOLO_RUN / "train_batch1.jpg", "Train Batch 1")
+        with col3:
+            _img(YOLO_RUN / "train_batch2.jpg", "Train Batch 2")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 4 — Benchmark Comparison
+    # ══════════════════════════════════════════════════════════════════════════
+    if (CASES_DIR / "benchmark_comparison.png").exists():
+        st.markdown("---")
+        st.markdown("### Benchmark Comparison")
+        _img(CASES_DIR / "benchmark_comparison.png", "Model Benchmark Comparison")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 5 — Architecture & Config (unchanged)
+    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
     st.markdown("### Model Architecture")
     col1, col2 = st.columns(2)
@@ -1118,7 +1220,8 @@ def render_model_performance_tab():
         st.markdown("""
         **Detection: YOLO26** (Jan 2026)
         - NMS-free, 43% faster than YOLOv8
-        - Fine-tuned on retail product annotations
+        - Fine-tuned on 4-class retail behaviour dataset
+        - freeze=22 (backbone preserved), label_smoothing=0.1
         - ByteTrack multi-object tracking
 
         **Feature Extraction: MobileNetV2**
@@ -1129,13 +1232,14 @@ def render_model_performance_tab():
         st.markdown("""
         **Temporal Classification: Bidirectional LSTM**
         - 256 hidden units, 2 layers, attention mechanism
-        - Sequence length: 30 frames, stride: 15
+        - Sequence length: 45 frames @ 6fps = 7.5s window
+        - Stride: 15 frames (50% overlap)
         - 2-class output: normal / shoplifting
 
         **XAI Layer**
-        - Attention weights → temporal explanation
-        - Intent score: 50% behaviour + 30% product + 20% duration
-        - Bias adjustment via video quality score
+        - Attention weights highlight most suspicious frames
+        - Intent score: 50% direct + 35% recon + 15% duration
+        - Temperature scaling T=1.5 for confidence calibration
         """)
 
     st.markdown("---")
@@ -1147,7 +1251,7 @@ def render_model_performance_tab():
                  "hidden":    (bilstm_info or {}).get("hidden", 256),
                  "layers":    (bilstm_info or {}).get("layers", 2),
                  "bidirectional": True, "dropout": 0.3,
-                 "seq_length":    (bilstm_info or {}).get("seq_len", 30)})
+                 "seq_length":    (bilstm_info or {}).get("seq_len", 45)})
     with c2:
         st.markdown("**MobileNetV2**")
         st.json({"backbone": "mobilenet_v2",
@@ -1250,37 +1354,82 @@ def render_analysis_results(results):
 
     # ── XAI Explanation ──
     st.markdown("### Explainable AI (XAI) Analysis")
-    with st.expander("Why did the model make this decision?", expanded=True):
-        st.markdown(f"""
-        **Step 1: Object Detection (YOLO26)**
-        - Scanned {det.get('frames_processed', 0)} video frames
-        - Detected {det.get('persons_tracked', 0)} person(s), {det.get('products_detected', 0)} product(s)
-        - YOLO26 (Jan 2026): NMS-free architecture, 43% faster than YOLOv8
+    xai_staff, xai_tech = st.tabs(["Security Staff View", "Technical Details"])
 
-        **Step 2: Feature Extraction (MobileNetV2)**
-        - Extracted 1280-dim spatial features per frame
-        - Raw backbone features (AdaptiveAvgPool, no projection head)
-        - Last 3 inverted residual blocks fine-tuned on retail video
+    events = results.get("behavior_events", [])
+    counts = {}
+    for e in events:
+        bt = e.get("behavior_type", "unknown")
+        counts[bt] = counts.get(bt, {"count": 0, "conf_sum": 0.0})
+        counts[bt]["count"]    += 1
+        counts[bt]["conf_sum"] += e.get("confidence", 0)
 
-        **Step 3: Temporal Classification (Bidirectional LSTM)**
-        - Analysed {LSTM_SEQ_LEN}-frame sliding windows (stride={LSTM_STRIDE})
-        - **Classification: {cls.upper()}** | **Confidence: {conf:.1%}**
-        """)
-
+    with xai_staff:
         if is_shop:
-            st.warning("**Important:** Pattern match only — not definitive proof. Human review essential.")
+            st.error(
+                f"The system reviewed the uploaded footage and identified behaviour consistent "
+                f"with shoplifting. The AI was {conf:.0%} confident in this assessment."
+            )
+            st.markdown(f"""
+**What the camera saw:**
+- **{det.get('persons_tracked', 0)} person(s)** were tracked moving through the area.
+- **{det.get('products_detected', 0)} product interaction(s)** were detected.
+- The person's movements across **{det.get('frames_processed', 0)} frames** matched patterns
+  seen in confirmed shoplifting cases — specifically actions such as picking up items,
+  looking around for staff or cameras, and concealing goods.
+
+**What this means:**
+This is a flag for review — not a confirmed incident. The AI system does not determine guilt.
+Before taking any action, review the forensic clips below, check the footage manually, and apply
+your store's standard procedure for suspected theft.
+
+**Risk level: {sev}** — {intent.get('explanation', '')}
+            """)
+            st.warning("All alerts are advisory. Do not confront anyone based solely on this result.")
+        else:
+            st.success(
+                "No suspicious behaviour was identified. The person's movements appear consistent "
+                "with normal shopping. No action is required."
+            )
+
+        if counts:
+            st.markdown("**Behaviour segments detected:**")
+            for bt, d in counts.items():
+                avg_c = d["conf_sum"] / d["count"]
+                label = "Suspicious" if bt in {"shoplifting", "concealment", "Looking around"} else "Normal"
+                st.markdown(f"- **{bt.capitalize()}** ({label}): {d['count']} segment(s) — avg {avg_c:.0%} confidence")
+
+    with xai_tech:
+        st.markdown(f"""
+**Step 1: Object Detection (YOLO26)**
+- Scanned {det.get('frames_processed', 0)} video frames (YOLO every 2nd, CNN every 4th)
+- Detected {det.get('persons_tracked', 0)} person(s), {det.get('products_detected', 0)} product interaction(s)
+- YOLO26 (Jan 2026): NMS-free architecture, 43% faster than YOLOv8
+- 4-class behaviour labels: Looking around / Picking-Holding / normal / shoplifting
+
+**Step 2: Feature Extraction (MobileNetV2)**
+- Extracted 1280-dim spatial features per frame
+- Raw backbone features via AdaptiveAvgPool2d (no projection head)
+- Last 3 inverted residual blocks fine-tuned on retail surveillance video
+
+**Step 3: Temporal Classification (Bidirectional LSTM)**
+- Analysed {LSTM_SEQ_LEN}-frame sliding windows (stride={LSTM_STRIDE})
+- BiLSTM: 256 hidden units, 2 layers, temporal attention mechanism
+- Temperature scaling T=1.5 applied to prevent overconfident outputs
+- **Classification: {cls.upper()}** | **Confidence: {conf:.1%}**
+
+**Step 4: Final Aggregation**
+- YOLO override threshold: peak frame confidence >= 60%
+- LSTM threshold: any window >= 55% shoplifting
+- Intent score: 50% direct detection + 35% reconnaissance + 15% duration
+        """)
+        if is_shop:
+            st.warning("Pattern match only — not definitive proof. Human review essential.")
         else:
             st.success("Movement patterns consistent with normal shopping behaviour.")
 
-        events = results.get("behavior_events", [])
-        if events:
-            st.markdown("#### Behavior Event Breakdown")
-            counts = {}
-            for e in events:
-                bt = e.get("behavior_type", "unknown")
-                counts[bt] = counts.get(bt, {"count": 0, "conf_sum": 0.0})
-                counts[bt]["count"]    += 1
-                counts[bt]["conf_sum"] += e.get("confidence", 0)
+        if counts:
+            st.markdown("#### Behaviour Event Breakdown")
             for bt, d in counts.items():
                 avg_c = d["conf_sum"] / d["count"]
                 icon  = "[HIGH]" if bt in {"shoplifting", "concealment"} else "[MED]" if bt == "bypass" else "[OK]"
@@ -1360,17 +1509,16 @@ def render_analysis_results(results):
     if is_shop:
         st.markdown("### Forensic Evidence")
         st.caption(
-            "Animated clips extracted from the shoplifting window (+ 1 s context). "
-            "Each clip is a distinct moment at least 2 s apart — no duplicates."
+            "Thumbnail previews of the shoplifting moment. "
+            "Click 'Play Clip' to open the animated clip in a popup."
         )
         clips = results.get("suspicious_frames", [])
         if clips:
             cols = st.columns(min(len(clips), 4))
             for i, fd in enumerate(clips):
                 with cols[i % 4]:
-                    if fd.get("gif_bytes"):
-                        st.image(fd["gif_bytes"], use_container_width=True)
-                    elif fd.get("thumbnail") is not None:
+                    # Static thumbnail as card preview
+                    if fd.get("thumbnail") is not None:
                         st.image(fd["thumbnail"], use_container_width=True)
                     st.caption(
                         f"**{fd['behavior'].upper()}**  \n"
@@ -1378,6 +1526,9 @@ def render_analysis_results(results):
                         f"{fd.get('clip_start', 0):.1f}s – {fd.get('clip_end', 0):.1f}s  "
                         f"|  {fd['confidence']:.0%} confidence"
                     )
+                    if st.button("Play Clip", key=f"clip_btn_{i}"):
+                        st.session_state["_modal_clip"] = fd
+                        _show_clip_modal()
         else:
             st.info("No high-confidence shoplifting clips found (threshold: 50%).")
         st.markdown("---")
@@ -1884,12 +2035,12 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align:center;color:#888;padding:2rem 0'>
-        <p style='font-size:1.1rem;font-weight:500'>Digital Witness — Deep Learning Retail Security Assistant</p>
+        <p style='font-size:1.1rem;font-weight:500'>Digital Witness - Deep Learning Retail Security Assistant</p>
         <p style='font-size:0.9rem'>
             YOLO26 (detection) → MobileNetV2 (features) → Bidirectional LSTM (classification)<br>
             Advisory system only. All alerts require human validation.
         </p>
-        <p style='font-size:0.8rem;margin-top:1rem'>Final Year Project — IIT 2026</p>
+        <p style='font-size:0.8rem;margin-top:1rem'>IIT 2026 Final Year Project Santosh_Manoharadas_20220967_w1954095</p>
     </div>""", unsafe_allow_html=True)
 
 
