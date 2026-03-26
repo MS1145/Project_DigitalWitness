@@ -30,8 +30,5 @@ Thumbs.db
 desktop.ini
 nul
 
-# Logs
-*.log
-
 # Claude Code settings
 .claude/
