@@ -1,20 +1,10 @@
-"""
-Digital Witness — Entry Point
-
-Usage:
-    python run.py        Launch the Streamlit web interface
-"""
 import sys
 import subprocess
 
 
 def main():
-    print("\n" + "=" * 50)
-    print("  DIGITAL WITNESS")
+    print("\n DIGITAL WITNESS")
     print("  Retail Security Assistant")
-    print("=" * 50)
-    print("\nStarting web interface at http://localhost:8501")
-    print("Press Ctrl+C to stop.\n")
 
     try:
         subprocess.run([
