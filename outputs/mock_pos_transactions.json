@@ -1,0 +1,326 @@
+[
+  {
+    "session_id": "SES-0005",
+    "timestamp": "2026-03-13T09:01:47",
+    "items_billed": 7,
+    "receipt": {
+      "Crisps": 1,
+      "Frozen Veg": 1,
+      "Yoghurt": 1,
+      "Toothpaste": 1,
+      "Hand Cream": 1,
+      "Milk (1L)": 1,
+      "Popcorn": 1
+    },
+    "total_price": 38.61,
+    "payment_method": "card",
+    "cashier_id": "C04",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0006",
+    "timestamp": "2026-03-13T10:03:46",
+    "items_billed": 7,
+    "receipt": {
+      "Ready Meal": 1,
+      "Sports Drink": 1,
+      "Coffee (can)": 1,
+      "Crisps": 1,
+      "Toothpaste": 1,
+      "Face Wash": 1,
+      "Biscuits": 1
+    },
+    "total_price": 29.51,
+    "payment_method": "card",
+    "cashier_id": "C03",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-0012",
+    "timestamp": "2026-03-13T10:38:22",
+    "items_billed": 1,
+    "receipt": {
+      "Face Wash": 1
+    },
+    "total_price": 7.79,
+    "payment_method": "cash",
+    "cashier_id": "C02",
+    "till_id": "TILL-3"
+  },
+  {
+    "session_id": "SES-0017",
+    "timestamp": "2026-03-13T11:23:52",
+    "items_billed": 7,
+    "receipt": {
+      "Orange Juice": 1,
+      "Popcorn": 2,
+      "Biscuits": 1,
+      "Crisps": 1,
+      "Hand Cream": 1,
+      "Milk (1L)": 1
+    },
+    "total_price": 38.53,
+    "payment_method": "contactless",
+    "cashier_id": "C01",
+    "till_id": "TILL-3"
+  },
+  {
+    "session_id": "SES-0007",
+    "timestamp": "2026-03-13T11:43:02",
+    "items_billed": 6,
+    "receipt": {
+      "Fish Fingers": 1,
+      "Iced Tea": 1,
+      "Energy Drink": 2,
+      "Bread": 1,
+      "Sports Drink": 1
+    },
+    "total_price": 20.17,
+    "payment_method": "contactless",
+    "cashier_id": "C04",
+    "till_id": "TILL-4"
+  },
+  {
+    "session_id": "SES-0010",
+    "timestamp": "2026-03-13T11:59:37",
+    "items_billed": 2,
+    "receipt": {
+      "Toothpaste": 1,
+      "Energy Drink": 1
+    },
+    "total_price": 13.48,
+    "payment_method": "card",
+    "cashier_id": "C01",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0001",
+    "timestamp": "2026-03-13T12:10:01",
+    "items_billed": 6,
+    "receipt": {
+      "Biscuits": 1,
+      "Milk (1L)": 1,
+      "Frozen Chips": 2,
+      "Toothpaste": 1,
+      "Bread": 1
+    },
+    "total_price": 35.75,
+    "payment_method": "card",
+    "cashier_id": "C01",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0019",
+    "timestamp": "2026-03-13T12:57:16",
+    "items_billed": 8,
+    "receipt": {
+      "Soft Drink": 1,
+      "Fish Fingers": 1,
+      "Nuts (200g)": 1,
+      "Soap": 1,
+      "Ready Meal": 1,
+      "Frozen Chips": 1,
+      "Frozen Pizza": 1,
+      "Chocolate Bar": 1
+    },
+    "total_price": 42.66,
+    "payment_method": "cash",
+    "cashier_id": "C04",
+    "till_id": "TILL-3"
+  },
+  {
+    "session_id": "SES-0014",
+    "timestamp": "2026-03-13T13:05:19",
+    "items_billed": 5,
+    "receipt": {
+      "Crisps": 1,
+      "Yoghurt": 1,
+      "Toothpaste": 1,
+      "Face Wash": 1,
+      "Hand Cream": 1
+    },
+    "total_price": 22.19,
+    "payment_method": "cash",
+    "cashier_id": "C03",
+    "till_id": "TILL-4"
+  },
+  {
+    "session_id": "SES-0020",
+    "timestamp": "2026-03-13T13:20:53",
+    "items_billed": 6,
+    "receipt": {
+      "Deodorant": 1,
+      "Water (500ml)": 1,
+      "Chocolate Bar": 1,
+      "Soap": 1,
+      "Yoghurt": 1,
+      "Biscuits": 1
+    },
+    "total_price": 27.61,
+    "payment_method": "cash",
+    "cashier_id": "C01",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0004",
+    "timestamp": "2026-03-13T14:41:25",
+    "items_billed": 1,
+    "receipt": {
+      "Biscuits": 1
+    },
+    "total_price": 4.63,
+    "payment_method": "card",
+    "cashier_id": "C02",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0008",
+    "timestamp": "2026-03-13T15:41:42",
+    "items_billed": 1,
+    "receipt": {
+      "Water (500ml)": 1
+    },
+    "total_price": 6.64,
+    "payment_method": "contactless",
+    "cashier_id": "C05",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-0009",
+    "timestamp": "2026-03-13T16:32:13",
+    "items_billed": 6,
+    "receipt": {
+      "Frozen Veg": 1,
+      "Frozen Pizza": 1,
+      "Bread": 2,
+      "Shampoo": 1,
+      "Biscuits": 1
+    },
+    "total_price": 29.35,
+    "payment_method": "card",
+    "cashier_id": "C04",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0015",
+    "timestamp": "2026-03-13T16:52:57",
+    "items_billed": 6,
+    "receipt": {
+      "Eggs (6pk)": 1,
+      "Coffee (can)": 1,
+      "Fish Fingers": 1,
+      "Ice Cream": 1,
+      "Biscuits": 1,
+      "Soap": 1
+    },
+    "total_price": 20.19,
+    "payment_method": "contactless",
+    "cashier_id": "C05",
+    "till_id": "TILL-4"
+  },
+  {
+    "session_id": "SES-0018",
+    "timestamp": "2026-03-13T17:16:08",
+    "items_billed": 7,
+    "receipt": {
+      "Orange Juice": 3,
+      "Milk (1L)": 1,
+      "Biscuits": 1,
+      "Sports Drink": 1,
+      "Frozen Pizza": 1
+    },
+    "total_price": 39.49,
+    "payment_method": "contactless",
+    "cashier_id": "C04",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-0016",
+    "timestamp": "2026-03-13T18:21:30",
+    "items_billed": 1,
+    "receipt": {
+      "Iced Tea": 1
+    },
+    "total_price": 0.75,
+    "payment_method": "card",
+    "cashier_id": "C05",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-0003",
+    "timestamp": "2026-03-13T18:38:59",
+    "items_billed": 6,
+    "receipt": {
+      "Milk (1L)": 1,
+      "Frozen Veg": 1,
+      "Soft Drink": 1,
+      "Face Wash": 1,
+      "Ready Meal": 1,
+      "Granola Bar": 1
+    },
+    "total_price": 29.96,
+    "payment_method": "contactless",
+    "cashier_id": "C02",
+    "till_id": "TILL-2"
+  },
+  {
+    "session_id": "SES-0013",
+    "timestamp": "2026-03-13T18:49:10",
+    "items_billed": 4,
+    "receipt": {
+      "Shampoo": 1,
+      "Energy Drink": 2,
+      "Frozen Chips": 1
+    },
+    "total_price": 21.92,
+    "payment_method": "contactless",
+    "cashier_id": "C05",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-0011",
+    "timestamp": "2026-03-13T18:51:14",
+    "items_billed": 7,
+    "receipt": {
+      "Popcorn": 1,
+      "Crisps": 1,
+      "Soft Drink": 1,
+      "Frozen Veg": 1,
+      "Granola Bar": 1,
+      "Ready Meal": 1,
+      "Frozen Chips": 1
+    },
+    "total_price": 32.53,
+    "payment_method": "contactless",
+    "cashier_id": "C01",
+    "till_id": "TILL-4"
+  },
+  {
+    "session_id": "SES-0002",
+    "timestamp": "2026-03-13T20:51:22",
+    "items_billed": 3,
+    "receipt": {
+      "Ready Meal": 1,
+      "Eggs (6pk)": 1,
+      "Bread": 1
+    },
+    "total_price": 17.69,
+    "payment_method": "card",
+    "cashier_id": "C05",
+    "till_id": "TILL-1"
+  },
+  {
+    "session_id": "SES-SUSP-8009",
+    "timestamp": "2026-03-13T23:49:12.491817",
+    "items_billed": 2,
+    "receipt": {
+      "Popcorn": 1,
+      "Milk (1L)": 1
+    },
+    "total_price": 3.7,
+    "payment_method": "contactless",
+    "cashier_id": "C01",
+    "till_id": "TILL-3",
+    "_note": "TEST: 5 detected vs 2 billed"
+  }
+]
