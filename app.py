@@ -686,8 +686,8 @@ def run_pipeline(video_path, progress_callback=None,
                 logits, _ = bilstm_model(x_t)
                 probs     = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
             predictions.append({
-                "start"        : start / fps_val,
-                "end"          : (start + LSTM_SEQ_LEN) / fps_val,
+                "start"        : start * feat_step / fps_val,
+                "end"          : (start + LSTM_SEQ_LEN) * feat_step / fps_val,
                 "behavior_type": lstm_classes[int(np.argmax(probs))],
                 "confidence"   : min(float(np.max(probs)), 0.99),
                 "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
@@ -790,6 +790,10 @@ def run_pipeline(video_path, progress_callback=None,
     alert = None
     if adj_score >= 0.5:
         n_susp = len(direct_e) + len(recon_e)
+        if n_susp == 0 and overall_class == "shoplifting":
+            # YOLO-override: count YOLO-level shoplifting/recon frame detections
+            n_susp = (product_pickups.get("shoplifting", 0)
+                      + product_pickups.get("Looking around", 0))
         alert  = {
             "alert_id": f"ALERT-{datetime.now().strftime('%Y%m%d%H%M%S')}-0001",
             "level"   : severity,
@@ -838,11 +842,10 @@ def run_pipeline(video_path, progress_callback=None,
             "score"      : adj_score,
             "severity"   : severity,
             "components" : {"concealment": s_conceal,
-                            "bypass": s_bypass,
                             "duration": s_dur},
             "explanation": (
                 f"Score: {adj_score:.2f} ({severity}). "
-                f"Concealment: {s_conceal:.2f}, Bypass: {s_bypass:.2f}, Duration: {s_dur:.2f}"
+                f"Concealment: {s_conceal:.2f}, Duration: {s_dur:.2f}"
             ),
         },
         "quality_analysis": {
@@ -891,6 +894,10 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
                                        "concealment", "bypass"}
         and e.get("confidence", 0) >= 0.5
     ]
+    # YOLO-override fallback: overall detection confirmed shoplifting but all LSTM
+    # windows were labelled normal — grab the highest-confidence windows as evidence.
+    if not suspicious and behavior_events:
+        suspicious = sorted(behavior_events, key=lambda x: x.get("confidence", 0), reverse=True)[:max_clips]
     if not suspicious:
         return []
 
@@ -1268,6 +1275,142 @@ def render_model_performance_tab():
                  "early_stopping_patience": 10})
 
 
+def _build_report_md(results):
+    """Return a Markdown string summarising the analysis — suitable for upload/debugging."""
+    import json as _json
+    from datetime import datetime as _dt
+
+    vm    = results.get("video_metadata", {})
+    lstm  = results.get("lstm_detection", {})
+    det   = results.get("detections", {})
+    intent = results.get("intent_score", {})
+    qual  = results.get("quality_analysis", {})
+    bias  = results.get("bias_report", {})
+    events = results.get("behavior_events", [])
+    clips  = results.get("suspicious_frames", [])
+    comps  = intent.get("components", {})
+
+    yolo_override = (
+        lstm.get("is_shoplifting", False)
+        and bool(events)
+        and all(e.get("behavior_type") == "normal" for e in events)
+    )
+
+    lines = [
+        "# Digital Witness — Analysis Report",
+        f"**Generated:** {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "---",
+        "## Video Metadata",
+        f"| Field | Value |",
+        f"|---|---|",
+        f"| Filename | {vm.get('filename', 'N/A')} |",
+        f"| Duration | {vm.get('duration', 0):.1f}s |",
+        f"| FPS | {vm.get('fps', 0):.1f} |",
+        f"| Resolution | {vm.get('width', 0)}×{vm.get('height', 0)} |",
+        f"| Frame Count | {vm.get('frame_count', 0)} |",
+        "",
+        "---",
+        "## Detection Result",
+        f"| Field | Value |",
+        f"|---|---|",
+        f"| Classification | **{lstm.get('classification', 'N/A').upper()}** |",
+        f"| Confidence | {lstm.get('confidence', 0):.1%} |",
+        f"| Is Shoplifting | {lstm.get('is_shoplifting', False)} |",
+        f"| Risk Level | {intent.get('severity', 'N/A')} |",
+        f"| Risk Score | {intent.get('score', 0):.3f} |",
+        f"| YOLO Override Suspected | {yolo_override} |",
+        "",
+        "---",
+        "## Score Components",
+        f"| Component | Score |",
+        f"|---|---|",
+    ]
+    for k, v in comps.items():
+        lines.append(f"| {k.capitalize()} | {v:.3f} |")
+    if yolo_override:
+        lines.append("")
+        lines.append("> **Note:** All components are 0 — detection was YOLO-driven, not LSTM temporal.")
+    lines += [
+        "",
+        f"**Explanation:** {intent.get('explanation', 'N/A')}",
+        "",
+        "---",
+        "## Detection Statistics",
+        f"| Metric | Value |",
+        f"|---|---|",
+        f"| People Interacted with Products | {det.get('persons_tracked', 0)} |",
+        f"| Products Detected | {det.get('products_detected', 0)} |",
+        f"| Suspicious Interactions | {det.get('interactions', 0)} |",
+        f"| Frames Processed | {det.get('frames_processed', 0)} |",
+        "",
+        "---",
+        f"## Behavior Events ({len(events)} windows)",
+    ]
+    if events:
+        lines += ["| # | Behavior | Start | End | Confidence |", "|---|---|---|---|---|"]
+        for i, e in enumerate(events, 1):
+            lines.append(
+                f"| {i} | {e.get('behavior_type','?').capitalize()} "
+                f"| {e.get('start_time',0):.1f}s "
+                f"| {e.get('end_time',0):.1f}s "
+                f"| {e.get('confidence',0):.1%} |"
+            )
+        if yolo_override:
+            lines.append("")
+            lines.append("> **Note:** All LSTM windows labelled 'normal' — timeline mismatch with SHOPLIFTING banner is expected (YOLO override).")
+    else:
+        lines.append("No behavior events recorded.")
+
+    lines += [
+        "",
+        "---",
+        f"## Forensic Clips ({len(clips)} extracted)",
+    ]
+    if clips:
+        lines += ["| # | Behavior | Start | End | Confidence |", "|---|---|---|---|---|"]
+        for i, c in enumerate(clips, 1):
+            lines.append(
+                f"| {i} | {c.get('behavior','?').upper()} "
+                f"| {c.get('clip_start',0):.1f}s "
+                f"| {c.get('clip_end',0):.1f}s "
+                f"| {c.get('confidence',0):.0%} |"
+            )
+    else:
+        lines.append("No clips extracted.")
+
+    lines += [
+        "",
+        "---",
+        "## Quality & Fairness",
+        f"| Metric | Value |",
+        f"|---|---|",
+        f"| Reliability Score | {qual.get('reliability_score', 0):.1%} |",
+        f"| Detection Rate | {qual.get('detection_rate', 0):.1%} |",
+        f"| Analysis Usable | {qual.get('usable', False)} |",
+        f"| Fairness Score | {bias.get('overall_fairness_score', 0):.1%} |",
+        f"| Requires Review | {bias.get('requires_review', False)} |",
+    ]
+    for flag in bias.get("flags", []):
+        lines.append(f"- **Flag:** {flag}")
+
+    lines += [
+        "",
+        "---",
+        "## Raw JSON (for debugging)",
+        "```json",
+    ]
+    # Strip non-serialisable thumbnail arrays before dumping
+    safe = _json.loads(_json.dumps(results, default=lambda o: "<non-serialisable>"))
+    for sf in safe.get("suspicious_frames", []):
+        sf.pop("thumbnail", None)
+        sf.pop("gif_bytes", None)
+    lines.append(_json.dumps(safe, indent=2))
+    lines.append("```")
+
+    return "\n".join(lines)
+
+
 def render_analysis_results(results):
     if not results.get("success", False):
         st.error(f"Analysis failed: {results.get('error', 'Unknown error')}")
@@ -1345,11 +1488,18 @@ def render_analysis_results(results):
     # ── Detection Stats ──
     st.markdown("### Detection Statistics")
     det = results.get("detections", {})
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("PEOPLE INTERACTED WITH THE PRODUCTS",    det.get("persons_tracked", 0))
-    c2.metric("PICKED UP PRODUCTS", det.get("products_detected", 0))
-    c3.metric("Interactions",     det.get("interactions", 0))
-    c4.metric("Frames Processed", det.get("frames_processed", 0))
+    _interactions = det.get("interactions", 0)
+    if _interactions > 0:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("People Interacted with Products", det.get("persons_tracked", 0))
+        c2.metric("Picked Up Products",              det.get("products_detected", 0))
+        c3.metric("Suspicious Interactions",         _interactions)
+        c4.metric("Frames Analysed",                 det.get("frames_processed", 0))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("People Interacted with Products", det.get("persons_tracked", 0))
+        c2.metric("Picked Up Products",              det.get("products_detected", 0))
+        c3.metric("Frames Analysed",                 det.get("frames_processed", 0))
     st.markdown("---")
 
     # ── XAI Explanation ──
@@ -1370,20 +1520,23 @@ def render_analysis_results(results):
                 f"The system reviewed the uploaded footage and identified behaviour consistent "
                 f"with shoplifting. The AI was {conf:.0%} confident in this assessment."
             )
+            _dur_s = results.get("video_metadata", {}).get("duration", 0)
+            _dur_str = f"{int(_dur_s // 60)}m {int(_dur_s % 60)}s" if _dur_s >= 60 else f"{_dur_s:.0f}s"
+            _sev_plain = {"CRITICAL": "Very High", "HIGH": "High",
+                          "MEDIUM": "Medium", "LOW": "Low", "NONE": "Low"}.get(sev, sev.capitalize())
             st.markdown(f"""
 **What the camera saw:**
 - **{det.get('persons_tracked', 0)} person(s)** were tracked moving through the area.
-- **{det.get('products_detected', 0)} product interaction(s)** were detected.
-- The person's movements across **{det.get('frames_processed', 0)} frames** matched patterns
-  seen in confirmed shoplifting cases — specifically actions such as picking up items,
-  looking around for staff or cameras, and concealing goods.
+- **{det.get('products_detected', 0)} product interaction(s)** were detected across **{_dur_str}** of footage.
+- The person's movements matched patterns seen in confirmed shoplifting cases — specifically
+  actions such as picking up items, looking around for staff or cameras, and concealing goods.
 
 **What this means:**
 This is a flag for review — not a confirmed incident. The AI system does not determine guilt.
 Before taking any action, review the forensic clips below, check the footage manually, and apply
 your store's standard procedure for suspected theft.
 
-**Risk level: {sev}** — {intent.get('explanation', '')}
+**Risk level: {_sev_plain}** ({conf:.0%} confidence)
             """)
             st.warning("All alerts are advisory. Do not confront anyone based solely on this result.")
         else:
@@ -1455,9 +1608,10 @@ your store's standard procedure for suspected theft.
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        st.markdown("### Score Components")
         components = intent.get("components", {})
-        if components:
+        _has_components = components and any(v > 0 for v in components.values())
+        if _has_components:
+            st.markdown("### Score Components")
             fig = go.Figure(go.Bar(
                 x=list(components.values()), y=list(components.keys()),
                 orientation="h", marker_color="#667eea"
@@ -1465,43 +1619,18 @@ your store's standard procedure for suspected theft.
             fig.update_layout(height=200, margin=dict(l=20,r=20,t=20,b=20),
                               xaxis=dict(range=[0, 1], tickformat=".0%"))
             st.plotly_chart(fig, use_container_width=True)
-        st.info(intent.get("explanation", "No explanation available."))
+            st.info(intent.get("explanation", "No explanation available."))
+        else:
+            st.markdown("### Detection Summary")
+            _yolo_shop  = results.get("product_pickups", {}).get("shoplifting", 0)
+            _yolo_recon = results.get("product_pickups", {}).get("Looking around", 0)
+            st.markdown(
+                f"The camera directly identified **{_yolo_shop} shoplifting action(s)** "
+                f"and **{_yolo_recon} suspicious looking-around behaviour(s)** "
+                f"from individual frames across the footage."
+            )
 
     st.markdown("---")
-
-    # ── Behavior Timeline ──
-    st.markdown("### Behavior Timeline")
-    events = results.get("behavior_events", [])
-    if events:
-        colors = {"normal": "#00c853", "shoplifting": "#e91e63",
-                  "concealment": "#ff5722", "bypass": "#f44336"}
-        fig = go.Figure()
-        for i, ev in enumerate(events):
-            bt  = ev.get("behavior_type", "unknown")
-            col = colors.get(bt, "#667eea")
-            fig.add_trace(go.Scatter(
-                x=[ev["start_time"], ev["end_time"]], y=[0, 0],
-                mode="lines", line=dict(color=col, width=25),
-                name=bt, showlegend=(i == 0 or events[i-1]["behavior_type"] != bt),
-                hovertemplate=(f"Behavior: {bt}<br>Time: {ev['start_time']:.1f}s – "
-                               f"{ev['end_time']:.1f}s<br>Conf: {ev['confidence']:.1%}<extra></extra>"),
-            ))
-        fig.update_layout(
-            title="Behaviour Over Time", xaxis_title="Time (seconds)",
-            height=150, yaxis=dict(visible=False),
-            margin=dict(l=20, r=20, t=50, b=20)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        with st.expander("View Detailed Behaviour Events"):
-            rows = [{"Behaviour": e["behavior_type"].capitalize(),
-                     "Start": f"{e['start_time']:.1f}s",
-                     "End": f"{e['end_time']:.1f}s",
-                     "Confidence": f"{e['confidence']:.1%}"}
-                    for e in events]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    else:
-        st.info("No behaviour events detected.")
 
     st.markdown("---")
 
@@ -1509,28 +1638,60 @@ your store's standard procedure for suspected theft.
     if is_shop:
         st.markdown("### Forensic Evidence")
         st.caption(
-            "Thumbnail previews of the shoplifting moment. "
-            "Click 'Play Clip' to open the animated clip in a popup."
+            "Thumbnail previews of the suspicious moment. "
+            "Click the thumbnail or the Play button to view the animated clip."
         )
         clips = results.get("suspicious_frames", [])
         if clips:
             cols = st.columns(min(len(clips), 4))
             for i, fd in enumerate(clips):
                 with cols[i % 4]:
-                    # Static thumbnail as card preview
                     if fd.get("thumbnail") is not None:
-                        st.image(fd["thumbnail"], use_container_width=True)
+                        # Overlay a ▶ play icon on the thumbnail using HTML
+                        import base64, cv2 as _cv2
+                        from PIL import Image as _PIL_Image
+                        import io as _io
+                        _thumb = fd["thumbnail"]
+                        _pil   = _PIL_Image.fromarray(_thumb)
+                        _buf   = _io.BytesIO()
+                        _pil.save(_buf, format="JPEG", quality=80)
+                        _b64   = base64.b64encode(_buf.getvalue()).decode()
+                        st.markdown(
+                            f"""<div style="position:relative;cursor:pointer;"
+                                     onclick="window.dispatchEvent(new CustomEvent('dw_play_{i}'))">
+                                <img src="data:image/jpeg;base64,{_b64}"
+                                     style="width:100%;border-radius:6px;">
+                                <div style="position:absolute;top:50%;left:50%;
+                                            transform:translate(-50%,-50%);
+                                            background:rgba(0,0,0,0.55);border-radius:50%;
+                                            width:48px;height:48px;display:flex;
+                                            align-items:center;justify-content:center;
+                                            font-size:22px;color:white;pointer-events:none;">
+                                    &#9654;
+                                </div>
+                            </div>""",
+                            unsafe_allow_html=True,
+                        )
+                    _clip_label = (
+                        "YOLO DETECTED"
+                        if fd.get("behavior", "").lower() == "normal"
+                        else fd.get("behavior", "SUSPICIOUS").upper()
+                    )
                     st.caption(
-                        f"**{fd['behavior'].upper()}**  \n"
-                        f"Frames {fd.get('frame_start', '?')} – {fd.get('frame_end', '?')}  \n"
+                        f"**{_clip_label}**  \n"
                         f"{fd.get('clip_start', 0):.1f}s – {fd.get('clip_end', 0):.1f}s  "
                         f"|  {fd['confidence']:.0%} confidence"
                     )
-                    if st.button("Play Clip", key=f"clip_btn_{i}"):
+                    if st.button("▶  Play Clip", key=f"clip_btn_{i}",
+                                 use_container_width=True):
                         st.session_state["_modal_clip"] = fd
                         _show_clip_modal()
         else:
-            st.info("No high-confidence shoplifting clips found (threshold: 50%).")
+            st.info(
+                "No forensic clips could be extracted. This usually means the video file "
+                "was unavailable at clip-extraction time, or no readable frames were found "
+                "in the detected windows."
+            )
         st.markdown("---")
 
     # ── Quality & Fairness ──
@@ -1603,6 +1764,25 @@ your store's standard procedure for suspected theft.
             <h4 style='margin:0'>No Concerns Detected</h4>
             <p style='margin:0.5rem 0'>Normal shopping behaviour. No immediate concerns.</p>
         </div>""", unsafe_allow_html=True)
+
+    # ── Download Report ──
+    st.markdown("---")
+    st.markdown("### Download Analysis Report")
+    st.caption(
+        "Export this result as a Markdown file. "
+        "You can upload it in a conversation to report bugs or inconsistencies."
+    )
+    try:
+        report_md = _build_report_md(results)
+        fname = results.get("video_metadata", {}).get("filename", "analysis").replace(".", "_")
+        st.download_button(
+            label="Download Report (.md)",
+            data=report_md.encode("utf-8"),
+            file_name=f"dw_report_{fname}.md",
+            mime="text/markdown",
+        )
+    except Exception as _e:
+        st.warning(f"Could not generate report: {_e}")
 
 
 # ─── YOLO class → readable product label mapping ──────────────────────────────
