@@ -1765,24 +1765,7 @@ your store's standard procedure for suspected theft.
             <p style='margin:0.5rem 0'>Normal shopping behaviour. No immediate concerns.</p>
         </div>""", unsafe_allow_html=True)
 
-    # ── Download Report ──
-    st.markdown("---")
-    st.markdown("### Download Analysis Report")
-    st.caption(
-        "Export this result as a Markdown file. "
-        "You can upload it in a conversation to report bugs or inconsistencies."
-    )
-    try:
-        report_md = _build_report_md(results)
-        fname = results.get("video_metadata", {}).get("filename", "analysis").replace(".", "_")
-        st.download_button(
-            label="Download Report (.md)",
-            data=report_md.encode("utf-8"),
-            file_name=f"dw_report_{fname}.md",
-            mime="text/markdown",
-        )
-    except Exception as _e:
-        st.warning(f"Could not generate report: {_e}")
+    # Download Report — disabled
 
 
 # ─── YOLO class → readable product label mapping ──────────────────────────────
@@ -2022,7 +2005,7 @@ def main():
     render_header()
     render_sidebar()
 
-    tab1, tab2, tab3 = st.tabs(["Model Performance", "Video Analysis", "POS Audit"])
+    tab2, tab1, tab3 = st.tabs(["Video Analysis", "Model Performance", "POS Audit"])
 
     with tab1:
         render_model_performance_tab()
