@@ -1,17 +1,12 @@
-"""
-Digital Witness — Streamlit Web Interface
-
-Self-contained: no src/ imports. Loads models from models/ directory.
-Pipeline: YOLO26 (detection) → MobileNetV2 (features) → LSTM (classification)
-"""
 import streamlit as st
-import tempfile
-import os
-import json
+import tempfile, os, json, cv2
 from pathlib import Path
 from datetime import datetime
 import numpy as np
 import pandas as pd
+import torch
+import torch.nn as nn
+from ultralytics import YOLO
 
 # ─── Page config (must be first Streamlit call) ───────────────────────────────
 st.set_page_config(
@@ -26,18 +21,21 @@ ROOT_DIR   = Path(__file__).parent
 MODELS_DIR = ROOT_DIR / "models"
 DATA_DIR   = ROOT_DIR / "data"
 
-YOLO26_PATH     = MODELS_DIR / "yolo26_retail.pt"
-YOLO26_BASE     = MODELS_DIR / "yolo26n.pt"          # COCO base — reliable person detection
-YOLO26_DW_V2    = MODELS_DIR / "yolo26_dw_v2.pt"     # domain-adaptive fine-tune (Option 1)
-MOBILENET_PATH  = MODELS_DIR / "mobilenet_extractor.pt"
-LSTM_PATH       = MODELS_DIR / "bilstm_dw.pt"
-LSTM_INFO_PATH  = MODELS_DIR / "bilstm_dw_info.json"
+YOLO26_PATH      = MODELS_DIR / "yolo26_retail.pt"
+YOLO26_BASE      = MODELS_DIR / "yolo26n.pt"
+YOLO26_DW_V2     = MODELS_DIR / "yolo26_dw_v2.pt"
+LSTM_PATH        = MODELS_DIR / "bilstm_dw.pt"
+LSTM_INFO_PATH   = MODELS_DIR / "bilstm_dw_info.json"
+BILSTM_LEAN_PATH = MODELS_DIR / "bilstm_lean_dw.pt"
+LEAN_FEAT_DIM    = 16
+LEAN_HIDDEN      = 128
+USE_LEAN         = BILSTM_LEAN_PATH.exists()
 
 BEHAVIOR_CLASSES = ["normal", "shoplifting"]
 YOLO_CONF        = 0.2
 YOLO_IOU         = 0.45
-MOBILENET_DIM    = 1280   # raw MobileNetV2 output (before projection head)
-LSTM_SEQ_LEN     = 45    # must match notebook Cell 5: 45 frames @ 6fps = 7.5s
+MOBILENET_DIM    = 1280
+LSTM_SEQ_LEN     = 45
 LSTM_STRIDE      = 15
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -106,23 +104,83 @@ st.markdown("""
 # ─── Inline Model Definitions ─────────────────────────────────────────────────
 
 def _get_device():
-    import torch
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+class TemporalAttention(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.attn = nn.Linear(dim, 1)
+    def forward(self, x):
+        w = torch.softmax(self.attn(x), dim=1)
+        return (w * x).sum(1), w.squeeze(-1)
+
+
+class LeanBiLSTM(nn.Module):
+    def __init__(self, feat_dim=16, hidden=128, layers=2, dropout=0.3, n_cls=2):
+        super().__init__()
+        self.bilstm    = nn.LSTM(feat_dim, hidden, layers, batch_first=True,
+                                 bidirectional=True, dropout=dropout if layers>1 else 0)
+        self.attention = TemporalAttention(hidden * 2)
+        self.clf       = nn.Sequential(
+            nn.LayerNorm(hidden*2), nn.Dropout(dropout),
+            nn.Linear(hidden*2, 64), nn.ReLU(), nn.Linear(64, n_cls)
+        )
+    def forward(self, x):
+        out, _ = self.bilstm(x)
+        ctx, w = self.attention(out)
+        return self.clf(ctx), w
+
+
+def extract_lean_features(results, img_w: int, img_h: int):
+    """YOLO result for one frame -> 16-dim float32 feature vector."""
+    import numpy as np
+    feat = np.zeros(16, dtype=np.float32)
+    feat[8] = feat[9] = 0.5   # default centre
+
+    if results.boxes is None or len(results.boxes) == 0:
+        return feat
+
+    cls_ids = results.boxes.cls.cpu().numpy().astype(int)
+    confs   = results.boxes.conf.cpu().numpy()
+    xyxy    = results.boxes.xyxy.cpu().numpy()
+
+    yolo_classes = list(results.names.values()) if hasattr(results, 'names') else []
+    name_to_idx  = {n: i for i, n in enumerate(yolo_classes)}
+    i_shop  = name_to_idx.get('shoplifting',    3)
+    i_look  = name_to_idx.get('looking-around', 1)
+    i_pick  = name_to_idx.get('picking-holding',2)
+    i_norm  = name_to_idx.get('normal',         0)
+
+    max_conf = {c: 0.0 for c in range(max(len(yolo_classes), 4))}
+    cnt      = {c: 0   for c in range(max(len(yolo_classes), 4))}
+    for c, cf in zip(cls_ids, confs):
+        max_conf[c] = max(max_conf[c], float(cf))
+        cnt[c] += 1
+
+    feat[0]  = max_conf[i_shop]
+    feat[1]  = max_conf[i_look]
+    feat[2]  = max_conf[i_pick]
+    feat[3]  = max_conf[i_norm]
+    feat[4]  = min(cnt[i_shop] / 5, 1.0)
+    feat[5]  = min(cnt[i_look] / 5, 1.0)
+    feat[6]  = min(cnt[i_pick] / 5, 1.0)
+    feat[7]  = min(len(cls_ids) / 10, 1.0)
+
+    best    = int(np.argmax(confs))
+    x1,y1,x2,y2 = xyxy[best]
+    feat[8]  = ((x1+x2)/2) / img_w
+    feat[9]  = ((y1+y2)/2) / img_h
+    feat[10] = (x2-x1) / img_w
+    feat[11] = (y2-y1) / img_h
+    feat[12] = 1.0
+    feat[13] = 1.0 if max_conf[i_shop] > 0 or max_conf[i_look] > 0 else 0.0
+    feat[14] = 1.0 if max_conf[i_shop] > 0.5 else 0.0
+    feat[15] = (cnt[i_shop]+cnt[i_look]) / max(len(cls_ids), 1)
+    return feat
+
+
 def _build_mobilenet_extractor():
-    """
-    Load MobileNetV2 feature extractor matching notebook Cell 4 architecture.
-
-    State dict keys (from mobilenet_dw.pt → 'state_dict'):
-      features.*    → MobileNetV2 backbone (layers 0-18)
-      pool.*        → AdaptiveAvgPool2d (no params)
-      classifier.*  → Linear(1280,512) → ReLU → Dropout → Linear(512,2)
-
-    Only features + pool are used here — classifier head is discarded.
-    extract_features() returns the 1280-dim vector used as BiLSTM input.
-    """
-    import torch.nn as nn
     from torchvision import models
     from torchvision.models import MobileNet_V2_Weights
 
@@ -132,21 +190,14 @@ def _build_mobilenet_extractor():
             base = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
             self.features   = base.features
             self.pool       = nn.AdaptiveAvgPool2d((1, 1))
-            # Classifier head — loaded from checkpoint but not used during feature extraction
             self.classifier = nn.Sequential(
-                nn.Linear(1280, 512),
-                nn.ReLU(inplace=True),
-                nn.Dropout(p=0.3),
-                nn.Linear(512, 2),
+                nn.Linear(1280, 512), nn.ReLU(inplace=True),
+                nn.Dropout(p=0.3),   nn.Linear(512, 2),
             )
 
         def extract_features(self, x):
-            """Return 1280-dim feature vector for a (1,3,224,224) tensor."""
-            import torch
             with torch.no_grad():
-                x = self.features(x)
-                x = self.pool(x)
-                return x.flatten(1)   # (1, 1280)
+                return self.pool(self.features(x)).flatten(1)
 
         def forward(self, x):
             return self.classifier(self.extract_features(x))
@@ -155,55 +206,39 @@ def _build_mobilenet_extractor():
 
 
 def _build_bilstm(num_classes=2, hidden=256, layers=2, dropout=0.3):
-    """
-    BiLSTMAttentionClassifier — matches exact notebook Cell 5 architecture.
-
-    State dict keys (from bilstm_dw.pt → 'state_dict'):
-      bilstm.*            → nn.LSTM bidirectional
-      attention.attn.0.*  → Linear(hidden*2, hidden)  [Tanh has no params]
-      attention.attn.2.*  → Linear(hidden, 1)
-      dropout             → no params
-      classifier.*        → Linear(hidden*2, num_classes)
-
-    Input: (B, T=45, 1280) pre-extracted MobileNetV2 feature sequences.
-    """
-    import torch
-    import torch.nn as nn
-
     class _TemporalAttention(nn.Module):
         def __init__(self, h):
             super().__init__()
-            self.attn = nn.Sequential(
-                nn.Linear(h, h // 2),
-                nn.Tanh(),
-                nn.Linear(h // 2, 1),
-            )
+            self.attn = nn.Sequential(nn.Linear(h, h//2), nn.Tanh(), nn.Linear(h//2, 1))
 
-        def forward(self, lstm_out):   # (B, T, h)
-            scores  = self.attn(lstm_out).squeeze(-1)   # (B, T)
-            weights = torch.softmax(scores, dim=1)       # (B, T)
+        def forward(self, lstm_out):
+            scores  = self.attn(lstm_out).squeeze(-1)
+            weights = torch.softmax(scores, dim=1)
             context = torch.bmm(weights.unsqueeze(1), lstm_out).squeeze(1)
             return context, weights
 
     class _BiLSTM(nn.Module):
         def __init__(self):
             super().__init__()
-            self.bilstm = nn.LSTM(
-                input_size=1280, hidden_size=hidden,
-                num_layers=layers, batch_first=True,
-                bidirectional=True,
-                dropout=dropout if layers > 1 else 0.0,
-            )
+            self.bilstm    = nn.LSTM(1280, hidden, layers, batch_first=True,
+                                     bidirectional=True,
+                                     dropout=dropout if layers > 1 else 0.0)
             self.attention  = _TemporalAttention(hidden * 2)
             self.dropout    = nn.Dropout(dropout)
             self.classifier = nn.Linear(hidden * 2, num_classes)
 
-        def forward(self, x):   # x: (B, T, 1280)
+        def forward(self, x):
             out, _    = self.bilstm(x)
             ctx, attn = self.attention(out)
             return self.classifier(self.dropout(ctx)), attn
 
     return _BiLSTM()
+
+
+def _build_lean_model():
+    m = LeanBiLSTM(LEAN_FEAT_DIM, LEAN_HIDDEN)
+    m.load_state_dict(torch.load(BILSTM_LEAN_PATH, map_location=_get_device()))
+    return m.eval()
 
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -261,16 +296,7 @@ def get_product_catalog():
 
 def run_pipeline(video_path, progress_callback=None,
                  visual_out_path=None, live_frame_callback=None):
-    """
-    Self-contained inference pipeline.
-    YOLO26 detection → MobileNetV2 feature extraction → LSTM classification
-    → Intent scoring → Bias assessment → Alert generation
-    """
-    import cv2
-    import torch
-    import torch.nn as nn
     from torchvision import transforms
-    from ultralytics import YOLO
 
     def _cb(p, m):
         if progress_callback:
@@ -279,49 +305,42 @@ def run_pipeline(video_path, progress_callback=None,
     _cb(0.0, "Initialising models...")
     dev = _get_device()
 
-    # GPU tuning
     if str(dev) == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    # ── Load YOLO26 ──
     yolo_path  = get_active_yolo_path()
     yolo_model = YOLO(yolo_path)
-    _yolo_dev  = 0 if str(dev) == "cuda" else "cpu"   # int 0 = first CUDA device
-    _yolo_half = (str(dev) == "cuda")                  # FP16 inference on GPU
+    _yolo_dev  = 0 if str(dev) == "cuda" else "cpu"
+    _yolo_half = (str(dev) == "cuda")
 
-    # Auto-detect which model is loaded so detection logic adapts automatically.
     _yolo_names   = set(yolo_model.names.values())
     _yolo_names_lower = {n.lower() for n in _yolo_names}
     IS_4CLS_MODEL = "Looking around" in _yolo_names or "Picking-Holding" in _yolo_names
-    IS_COCO_MODEL = "person" in _yolo_names_lower   # base COCO or COCO-derived
+    IS_COCO_MODEL = "person" in _yolo_names_lower
     _mode = "4-class behaviour" if IS_4CLS_MODEL else ("COCO" if IS_COCO_MODEL else "retail/unknown")
-    _cb(0.02, f"YOLO model: {_mode} ({Path(yolo_path).name}) — "
-              f"classes: {sorted(_yolo_names)[:6]}...")
+    _cb(0.02, f"YOLO model: {_mode} ({Path(yolo_path).name}) — classes: {sorted(_yolo_names)[:6]}...")
 
-    # ── Load MobileNetV2 feature extractor (mobilenet_dw.pt) ──
-    # Uses the fine-tuned weights from notebook Cell 4 — critical for accuracy.
-    # Features extracted here are what the BiLSTM was trained on.
-    mnet_model = _build_mobilenet_extractor().to(dev)
-    mnet_path  = MODELS_DIR / "mobilenet_dw.pt"
-    if mnet_path.exists():
-        mnet_ckpt = torch.load(mnet_path, map_location=dev, weights_only=False)
-        sd = mnet_ckpt['state_dict'] if isinstance(mnet_ckpt, dict) and 'state_dict' in mnet_ckpt else mnet_ckpt
-        mnet_model.load_state_dict(sd)
-    mnet_model.eval()
+    lstm_classes = BEHAVIOR_CLASSES
+    if USE_LEAN:
+        bilstm_model = _build_lean_model().to(dev)
+        mnet_model   = None
+    else:
+        mnet_model = _build_mobilenet_extractor().to(dev)
+        mnet_path  = MODELS_DIR / "mobilenet_dw.pt"
+        if mnet_path.exists():
+            mnet_ckpt = torch.load(mnet_path, map_location=dev, weights_only=False)
+            sd = mnet_ckpt['state_dict'] if isinstance(mnet_ckpt, dict) and 'state_dict' in mnet_ckpt else mnet_ckpt
+            mnet_model.load_state_dict(sd)
+        mnet_model.eval()
 
-    # ── Load BiLSTM classifier (bilstm_dw.pt) ──
-    # Architecture matches notebook Cell 5 BiLSTMAttentionClassifier exactly.
-    lstm_classes  = BEHAVIOR_CLASSES
-    bilstm_model  = _build_bilstm(num_classes=len(lstm_classes), hidden=256,
-                                   layers=2, dropout=0.3).to(dev)
-    if LSTM_PATH.exists():
-        bilstm_ckpt = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
-        sd = bilstm_ckpt['state_dict'] if isinstance(bilstm_ckpt, dict) and 'state_dict' in bilstm_ckpt else bilstm_ckpt
-        bilstm_model.load_state_dict(sd)
-    # If not found: keeps random weights — flagged in UI
-    bilstm_model.eval()
+        bilstm_model = _build_bilstm(num_classes=len(lstm_classes), hidden=256,
+                                      layers=2, dropout=0.3).to(dev)
+        if LSTM_PATH.exists():
+            bilstm_ckpt = torch.load(LSTM_PATH, map_location=dev, weights_only=False)
+            sd = bilstm_ckpt['state_dict'] if isinstance(bilstm_ckpt, dict) and 'state_dict' in bilstm_ckpt else bilstm_ckpt
+            bilstm_model.load_state_dict(sd)
+        bilstm_model.eval()
 
-    # ── Image preprocessing transform ──
     xform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((224, 224)),
@@ -330,53 +349,27 @@ def run_pipeline(video_path, progress_callback=None,
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    # 4-class behaviour model — ALL detections are person-level behaviour labels.
-    # There is no separate "person" class; each box is one of these four.
     BEHAVIOUR_4CLS = {"Looking around", "Picking-Holding", "normal", "shoplifting"}
-    # Suspicious classes used for intent scoring
     SUSPICIOUS_CLS = {"Looking around", "shoplifting"}
-    # Product-interaction class (replaces the old product proximity logic)
     PRODUCT_CLS    = {"Picking-Holding"}
 
     def _early_exit_normal(reason, f_num, f_total, fps, w, h):
-        """Return a lightweight normal result when video is too short to run BiLSTM."""
         return {
-            "success"       : True,
-            "early_exit"    : True,
-            "early_exit_reason": reason,
-            "video_metadata": {
-                "filename"   : Path(video_path).name,
-                "duration"   : f_num / max(fps, 1),
-                "fps"        : fps,
-                "width"      : w,
-                "height"     : h,
-                "frame_count": f_total,
-            },
-            "lstm_detection": {
-                "classification": "normal",
-                "confidence"    : 1.0,
-                "is_shoplifting": False,
-            },
-            "detections": {
-                "persons_tracked"  : 0,
-                "products_detected": 0,
-                "interactions"     : 0,
-                "frames_processed" : f_num,
-            },
-            "product_pickups"  : {},
-            "behavior_events"  : [],
-            "intent_score"     : {"score": 0.0, "severity": "NONE",
-                                  "components": {}, "explanation": reason},
-            "quality_analysis" : {"reliability_score": 1.0,
-                                  "detection_rate": 1.0, "usable": True},
-            "bias_report"      : {"overall_fairness_score": 1.0,
-                                  "analysis_reliable": True,
-                                  "requires_review": False, "flags": []},
-            "alert"            : None,
-            "model_trained"    : LSTM_PATH.exists(),
+            "success": True, "early_exit": True, "early_exit_reason": reason,
+            "video_metadata": {"filename": Path(video_path).name,
+                               "duration": f_num / max(fps, 1), "fps": fps,
+                               "width": w, "height": h, "frame_count": f_total},
+            "lstm_detection": {"classification": "normal", "confidence": 1.0, "is_shoplifting": False},
+            "detections": {"persons_tracked": 0, "products_detected": 0,
+                           "interactions": 0, "frames_processed": f_num},
+            "product_pickups": {}, "behavior_events": [],
+            "intent_score": {"score": 0.0, "severity": "NONE", "components": {}, "explanation": reason},
+            "quality_analysis": {"reliability_score": 1.0, "detection_rate": 1.0, "usable": True},
+            "bias_report": {"overall_fairness_score": 1.0, "analysis_reliable": True,
+                            "requires_review": False, "flags": []},
+            "alert": None, "model_trained": LSTM_PATH.exists(),
         }
 
-    # ── Video processing ──
     _cb(0.05, "Opening video...")
     cap          = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -399,17 +392,14 @@ def run_pipeline(video_path, progress_callback=None,
     yolo_step    = 2   # run YOLO every 2nd frame; reuse last result otherwise
     last_yolo_results = None
 
-    # ── Visual output setup ────────────────────────────────────────────────────
-    video_writer     = None
-    last_live_label  = None
-    last_live_conf   = 0.0
-    live_timeline    = []
-    _live_step       = 30       # update live preview every N frames
+    video_writer    = None
+    last_live_label = None
+    last_live_conf  = 0.0
+    live_timeline   = []
+    _live_step      = 30
     if visual_out_path:
         _fourcc      = cv2.VideoWriter_fourcc(*"mp4v")
-        video_writer = cv2.VideoWriter(
-            visual_out_path, _fourcc, fps_val, (width, height)
-        )
+        video_writer = cv2.VideoWriter(visual_out_path, _fourcc, fps_val, (width, height))
 
     while True:
         ret, frame = cap.read()
@@ -421,9 +411,7 @@ def run_pipeline(video_path, progress_callback=None,
             pct = min(0.05 + (frame_num / max(total_f, 1)) * 0.65, 0.70)
             _cb(pct, f"Processing frame {frame_num}/{total_f}...")
 
-        # ── YOLO26 detection + ByteTrack ──
-        # Run every yolo_step frames; reuse last detection on skipped frames.
-        # imgsz=320 cuts YOLO inference time ~4× vs default 640 with minor accuracy trade-off.
+        # Run YOLO every other frame; reuse on skipped frames for speed
         if frame_num % yolo_step == 1 or last_yolo_results is None:
             last_yolo_results = yolo_model.track(
                 frame, conf=YOLO_CONF, iou=YOLO_IOU, persist=True, verbose=False,
@@ -443,8 +431,6 @@ def run_pipeline(video_path, progress_callback=None,
                 cls_name = yolo_model.names[int(cls_id)]
 
                 if IS_4CLS_MODEL:
-                    # ── 4-class behaviour model ──────────────────────────────
-                    # Every detection is a person-level behaviour label.
                     if cls_name not in BEHAVIOUR_4CLS:
                         continue
                     tid = (real_ids[i] if real_ids is not None else -(i + 1))
@@ -456,19 +442,14 @@ def run_pipeline(video_path, progress_callback=None,
                     if cls_name in SUSPICIOUS_CLS:
                         product_pickup_events.add((tid, cls_name))
                 else:
-                    # ── COCO / retail / unknown model fallback ───────────────
-                    # Person detection strategy (in priority order):
-                    #  1. Class ID 0  — always "person" in any COCO-based model
-                    #  2. Class name "person" (case-insensitive)
-                    #  3. Name starts with "person" (e.g. "person-picking-up")
-                    #  4. Unknown model with no "person" class — treat ALL boxes
-                    #     as persons so tracking is never silently broken
                     cls_id_int = int(cls_id)
+                    # Fall back: treat class 0, anything named "person", or all boxes
+                    # when the model has no person class (avoids silent tracking failures)
                     is_person  = (
-                        cls_id_int == 0                          # COCO class 0 = person
+                        cls_id_int == 0
                         or cls_name.lower() == "person"
                         or cls_name.lower().startswith("person-")
-                        or (not IS_COCO_MODEL)                   # unknown model: count all
+                        or (not IS_COCO_MODEL)
                     )
                     is_product = cls_name in {
                         "bottle", "cup", "bowl", "banana", "apple", "sandwich",
@@ -486,20 +467,12 @@ def run_pipeline(video_path, progress_callback=None,
                         products_set.add(cls_name)
                         frame_product_boxes.append((cls_name, box_t))
 
-        # Update max concurrent persons.
-        # Count ALL entries — negative IDs are legitimate detections from frames
-        # where ByteTrack hasn't yet established tracks (first few frames, or
-        # low-confidence scenes). Filtering by k >= 0 was silently zeroing the
-        # count whenever ByteTrack was unavailable.
         real_person_count = len(frame_person_boxes)
         if real_person_count > max_concurrent_persons:
             max_concurrent_persons = real_person_count
 
-        # ── Current-frame YOLO signal (used for live badge priority) ──────────
-        # If YOLO detects "shoplifting" or "Looking around" in this frame the
-        # badge should reflect that immediately — the BiLSTM needs 45 frames of
-        # history before it can output a verdict, so YOLO acts as the early
-        # warning while LSTM provides the confirmed temporal classification.
+        # Per-frame YOLO signal for the live badge — YOLO can flag suspicious
+        # behaviour immediately while the BiLSTM waits for 45-frame history
         frame_yolo_label = None
         frame_yolo_conf  = 0.0
         if results.boxes is not None and IS_4CLS_MODEL:
@@ -515,12 +488,9 @@ def run_pipeline(video_path, progress_callback=None,
                         frame_yolo_label = "Looking around"
                         frame_yolo_conf  = float(_cof_v)
 
-        # Accumulate YOLO shoplifting confidence for final classification
         if frame_yolo_label == "shoplifting":
             yolo_shop_confs.append(frame_yolo_conf)
 
-        # Choose badge: YOLO live detection takes priority over LSTM when YOLO
-        # sees something suspicious; otherwise fall back to LSTM temporal verdict.
         _SUSP = {"shoplifting", "Looking around"}
         if frame_yolo_label in _SUSP:
             badge_label = frame_yolo_label
@@ -532,10 +502,8 @@ def run_pipeline(video_path, progress_callback=None,
             badge_label = None
             badge_conf  = 0.0
 
-        # ── Frame annotation (visual output + live preview) ───────────────────
         if video_writer or live_frame_callback:
             ann = frame.copy()
-            # Draw bounding boxes + labels for every YOLO detection
             if results.boxes is not None:
                 for box_t, cls_id_v, conf_v in zip(
                         results.boxes.xyxy.cpu().numpy(),
@@ -544,22 +512,15 @@ def run_pipeline(video_path, progress_callback=None,
                     x1, y1, x2, y2 = map(int, box_t)
                     cn_v = yolo_model.names[int(cls_id_v)]
                     if IS_4CLS_MODEL:
-                        if cn_v == "shoplifting":
-                            col_v = (0, 0, 220)      # red  (BGR)
-                        elif cn_v == "Looking around":
-                            col_v = (0, 140, 255)    # orange
-                        elif cn_v == "Picking-Holding":
-                            col_v = (0, 200, 255)    # yellow
-                        else:                        # normal
-                            col_v = (0, 200, 0)      # green
+                        col_v = ((0,0,220) if cn_v=="shoplifting" else
+                                 (0,140,255) if cn_v=="Looking around" else
+                                 (0,200,255) if cn_v=="Picking-Holding" else (0,200,0))
                         lbl_v = f"{cn_v} {conf_v:.0%}"
                     else:
                         is_p  = int(cls_id_v) == 0 or cn_v.lower() == "person"
                         col_v = (0, 200, 0) if is_p else (160, 160, 160)
                         lbl_v = f"Person {conf_v:.0%}" if is_p else f"{cn_v} {conf_v:.0%}"
-                    # Bounding box
                     cv2.rectangle(ann, (x1, y1), (x2, y2), col_v, 2)
-                    # Label background pill above the box
                     (tw, th), _ = cv2.getTextSize(lbl_v, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                     lbl_y = max(y1 - 4, th + 6)
                     cv2.rectangle(ann, (x1, lbl_y - th - 6), (x1 + tw + 8, lbl_y + 2),
@@ -569,21 +530,17 @@ def run_pipeline(video_path, progress_callback=None,
             # Draw classification badge - YOLO live signal takes priority,
             # falls back to LSTM temporal verdict once sequence is long enough.
             if badge_label:
-                b_col = ((0, 0, 200)   if badge_label == "shoplifting" else
-                         (0, 140, 255) if badge_label == "Looking around" else
-                         (20, 140, 20))
+                b_col = ((0,0,200) if badge_label == "shoplifting" else
+                         (0,140,255) if badge_label == "Looking around" else (20,140,20))
                 b_txt = f"{badge_label.upper()}  {badge_conf:.0%}"
                 (tw_b, th_b), _ = cv2.getTextSize(b_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
                 cv2.rectangle(ann, (8, 8), (tw_b + 18, th_b + 22), b_col, -1)
                 cv2.putText(ann, b_txt, (12, th_b + 16),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-            # Frame counter bottom-left
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255,255,255), 2, cv2.LINE_AA)
             cv2.putText(ann, f"{frame_num}/{total_f}", (8, ann.shape[0] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
-            # Write to VideoWriter
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180,180,180), 1, cv2.LINE_AA)
             if video_writer:
                 video_writer.write(ann)
-            # Live callback every _live_step frames
             if live_frame_callback and frame_num % _live_step == 0:
                 ann_rgb = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
                 tl_color = ("red"   if badge_label in {"shoplifting", "Looking around"} else
@@ -597,25 +554,24 @@ def run_pipeline(video_path, progress_callback=None,
                     "timeline"         : list(live_timeline),
                 })
 
-        # ── Person-product proximity → detect pickups ──
         for pid, pbox in frame_person_boxes.items():
             px1, py1, px2, py2 = pbox
-            ph   = max(py2 - py1, 1)          # person height as proximity scale
-            pcx  = (px1 + px2) / 2
-            pcy  = (py1 + py2) / 2
+            ph  = max(py2 - py1, 1)
+            pcx, pcy = (px1+px2)/2, (py1+py2)/2
             for cls_name, prod_box in frame_product_boxes:
                 qx1, qy1, qx2, qy2 = prod_box
-                qcx = (qx1 + qx2) / 2
-                qcy = (qy1 + qy2) / 2
-                dist = ((pcx - qcx) ** 2 + (pcy - qcy) ** 2) ** 0.5
-                if dist < ph * 1.2:   # within 1.2× person height ≈ arm's reach
+                dist = ((pcx-(qx1+qx2)/2)**2 + (pcy-(qy1+qy2)/2)**2)**0.5
+                if dist < ph * 1.2:
                     product_pickup_events.add((pid, cls_name))
 
-        # ── MobileNetV2 feature extraction (every feat_step frames for speed) ──
+        # ── Feature extraction (every feat_step frames for speed) ──
         if frame_num % feat_step == 0:
-            rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            x    = xform(rgb).unsqueeze(0).to(dev)
-            feat = mnet_model.extract_features(x).cpu().numpy().flatten()
+            if USE_LEAN:
+                feat = extract_lean_features(results, width, height)
+            else:
+                rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                x    = xform(rgb).unsqueeze(0).to(dev)
+                feat = mnet_model.extract_features(x).cpu().numpy().flatten()
             all_feats.append(feat)
             # Rolling BiLSTM for live badge — run once every LSTM_STRIDE features
             if (video_writer or live_frame_callback) and \
@@ -634,7 +590,6 @@ def run_pipeline(video_path, progress_callback=None,
     cap.release()
     duration = frame_num / fps_val
 
-    # ── Edge case: video too short — no features collected ──
     if not all_feats:
         _cb(1.0, "Video too short to analyse — returning normal.")
         return _early_exit_normal(
@@ -643,32 +598,25 @@ def run_pipeline(video_path, progress_callback=None,
             frame_num, total_f, fps_val, width, height,
         )
 
-    # Aggregate product pickup counts: how many distinct persons handled each product
     product_pickups = {}
     for (pid, cls_name) in product_pickup_events:
         product_pickups[cls_name] = product_pickups.get(cls_name, 0) + 1
-    # Distinct product classes actually interacted with (not all visible products)
     products_interacted = len({cls for (_, cls) in product_pickup_events})
 
     _cb(0.72, "Running LSTM temporal classification...")
 
-    # ── Sliding-window BiLSTM classification ──
-    feats_arr   = np.array(all_feats) if all_feats else np.zeros((1, MOBILENET_DIM))
+    _fdim     = LEAN_FEAT_DIM if USE_LEAN else MOBILENET_DIM
+    feats_arr = np.array(all_feats) if all_feats else np.zeros((1, _fdim))
     predictions = []
 
     if len(all_feats) < LSTM_SEQ_LEN:
-        pad = np.zeros((LSTM_SEQ_LEN - len(all_feats), MOBILENET_DIM))
+        pad = np.zeros((LSTM_SEQ_LEN - len(all_feats), _fdim))
         seq = np.vstack([feats_arr, pad])
         x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
         with torch.no_grad():
             logits, _ = bilstm_model(x_t)
-        # T=3.0 temperature scaling: divides logits before softmax to flatten
-        # overconfident distributions, giving natural variation in output values.
-        # Sequence-length scale penalises very short clips.
-        # Hard cap at 0.99 only — prevents displaying a literal "100%" but
-        # never artificially compresses results to a fixed ceiling.
-        TEMP = 3.0
-        probs    = torch.softmax(logits / TEMP, dim=1).cpu().numpy()[0]
+        # temperature scaling (T=3.0) flattens overconfident outputs; scale by sequence length
+        probs    = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
         scale    = min(1.0, len(all_feats) / LSTM_SEQ_LEN)
         raw_conf = float(np.max(probs)) * scale
         predictions.append({
@@ -698,14 +646,7 @@ def run_pipeline(video_path, progress_callback=None,
     shop_preds = [p for p in predictions if p["behavior_type"] == "shoplifting"]
     norm_preds = [p for p in predictions if p["behavior_type"] == "normal"]
 
-    # Priority aggregation:
-    # If ANY window shows shoplifting at >= SHOP_MIN_CONF that is the final result.
-    # A few seconds of normal behaviour at the end of a video cannot override
-    # sustained high-confidence shoplifting detected earlier in the footage.
-    #
-    # YOLO override: the YOLO model flags behaviour per-frame before the LSTM
-    # has enough history. If YOLO repeatedly detected shoplifting at high
-    # confidence, trust that signal even when the LSTM says normal.
+    # YOLO can override the LSTM when it repeatedly sees shoplifting at high confidence
     SHOP_MIN_CONF  = 0.55
     peak_shop_conf = max((p["confidence"] for p in shop_preds), default=0.0)
     yolo_peak      = max(yolo_shop_confs, default=0.0)
@@ -715,7 +656,6 @@ def run_pipeline(video_path, progress_callback=None,
                       (yolo_mean >= 0.50 and len(yolo_shop_confs) >= 3))
 
     if yolo_override or peak_shop_conf >= SHOP_MIN_CONF:
-        # Use YOLO peak confidence when it's higher than the LSTM's best window
         best          = max(shop_preds, key=lambda p: p["confidence"]) if shop_preds else None
         overall_class = "shoplifting"
         overall_conf  = max(
@@ -742,29 +682,21 @@ def run_pipeline(video_path, progress_callback=None,
 
     _cb(0.90, "Scoring intent...")
 
-    # ── Intent scoring (video-only, no POS) ──
-    # With 4-class model: "shoplifting" = direct detection, "Looking around" = recon.
-    # No "concealment" or "bypass" classes exist — map to closest equivalents.
     direct_e  = [p for p in predictions if p["behavior_type"] == "shoplifting"]
     recon_e   = [p for p in predictions if p["behavior_type"] == "Looking around"]
     susp_e    = direct_e + recon_e
 
-    # s_conceal: weighted by direct shoplifting confidence (primary signal)
     s_conceal = (np.mean([e["confidence"] for e in direct_e])
                  * min(1.0, len(direct_e) / 3.0)) if direct_e else 0.0
-    # s_bypass: reconnaissance behaviour is the closest proxy for bypass intent
     s_bypass  = (np.mean([e["confidence"] for e in recon_e])
                  * min(1.0, len(recon_e) / 3.0)) if recon_e else 0.0
     susp_secs = sum(e["end"] - e["start"] for e in susp_e)
     s_dur     = min(1.0, (susp_secs / max(1.0, duration)) * 3.0) if susp_e else 0.0
 
-    raw_score = 0.50 * s_conceal + 0.35 * s_bypass + 0.15 * s_dur
-    raw_score = max(0.0, min(1.0, raw_score))
+    raw_score = max(0.0, min(1.0, 0.50 * s_conceal + 0.35 * s_bypass + 0.15 * s_dur))
 
-    # When shoplifting was definitively detected (YOLO override or LSTM) but
-    # the LSTM windows were all "normal" so s_conceal/s_bypass came out zero,
-    # floor the risk score against the detection confidence so the risk tier
-    # matches the classification banner.
+    # floor risk score against detection confidence when YOLO/LSTM detected shoplifting
+    # but all LSTM windows were labelled normal (score components come out zero)
     if overall_class == "shoplifting" and raw_score < 0.3:
         raw_score = max(raw_score, overall_conf * 0.75)
         raw_score = max(0.0, min(1.0, raw_score))
@@ -866,27 +798,8 @@ def run_pipeline(video_path, progress_callback=None,
 
 
 def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
-    """
-    Extract up to max_clips animated GIF clips of the shoplifting portions of
-    the video.  Each clip covers the exact detected window plus 1 s padding on
-    each side so reviewers can see the moment in context.
-
-    Deduplication: windows whose midpoints are < 2 s apart are collapsed to the
-    highest-confidence one, preventing multiple nearly-identical clips.
-
-    Returns a list of dicts:
-        gif_bytes   : bytes  — animated GIF (auto-plays in st.image)
-        thumbnail   : ndarray (RGB) — first frame, used as static preview
-        timestamp   : float  — mid-point in seconds
-        frame_start : int    — first frame number of the window
-        frame_end   : int    — last frame number of the window
-        clip_start  : float  — clip start in seconds (with padding)
-        clip_end    : float  — clip end in seconds (with padding)
-        behavior    : str
-        confidence  : float
-    """
-    import cv2, io
     from PIL import Image
+    import io
 
     suspicious = [
         e for e in behavior_events
@@ -894,8 +807,6 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
                                        "concealment", "bypass"}
         and e.get("confidence", 0) >= 0.5
     ]
-    # YOLO-override fallback: overall detection confirmed shoplifting but all LSTM
-    # windows were labelled normal — grab the highest-confidence windows as evidence.
     if not suspicious and behavior_events:
         suspicious = sorted(behavior_events, key=lambda x: x.get("confidence", 0), reverse=True)[:max_clips]
     if not suspicious:

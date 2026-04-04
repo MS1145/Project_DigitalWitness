@@ -1,8 +1,8 @@
 names:
-- Looking around
-- Picking-Holding
-- normal
-- shoplifting
+  - looking-around
+  - picking-holding
+  - normal
+  - shoplifting
 nc: 4
 path: D:\Santosh\Project_DigitalWitness\Data\dataset
 roboflow:
