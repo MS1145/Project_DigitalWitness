@@ -1,10 +1,12 @@
 {
+  "backbone": "efficientnet_v2_s",
+  "best_val_acc": 0.9961977186311787,
+  "seq_len": 45,
+  "hidden": 256,
+  "layers": 2,
+  "feat_dim": 1280,
   "classes": [
     "normal",
     "shoplifting"
-  ],
-  "best_val_acc": 0.8859649122807017,
-  "seq_len": 45,
-  "hidden": 256,
-  "layers": 2
+  ]
 }
