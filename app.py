@@ -1,5 +1,6 @@
 import streamlit as st
 import tempfile, os, json, cv2, uuid
+import threading, queue
 from pathlib import Path
 from datetime import datetime
 import numpy as np
@@ -317,12 +318,11 @@ def _intent_score(predictions, duration, overall_cls, overall_conf, bilstm_train
 
 def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=None):
     """
-    Full inference pipeline for one video.
-    Steps:
-      1. YOLO26 tracks persons + detects 4-class behaviour every 2nd frame
-      2. EfficientNetV2-S extracts 1280-dim feature every 4th frame
-      3. BiLSTM classifies 45-frame sliding windows
-      4. Intent score aggregates LSTM + YOLO signals
+    Full inference pipeline — Producer-Consumer pattern.
+    Thread 1 (main): reads video, runs YOLO, updates Streamlit UI every frame.
+    Thread 2 (background): pulls frames from queue, runs EfficientNet + BiLSTM,
+                            updates shared_status whenever it has a new verdict.
+    This keeps the video display smooth — the UI never blocks on heavy CNN/LSTM math.
     """
     from torchvision import transforms
 
@@ -338,7 +338,6 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
     if bilstm: bilstm = bilstm.to(dev)
 
     yolo_names = set(yolo_model.names.values())
-    # the fine-tuned model has these 4 behaviour classes; base model only has COCO classes
     is_4cls = "shoplifting" in yolo_names and "looking-around" in yolo_names
 
     xform = transforms.Compose([
@@ -358,11 +357,45 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
     vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    all_feats = []       # 1280-dim numpy arrays, one per 4 frames
-    persons_max = 0      # peak simultaneous persons in any single frame
-    yolo_shop_confs = [] # per-frame YOLO shoplifting confidence (for override)
-    product_events = set()  # (person_id, cls_name) — who handled what
+    # Shared state — main thread reads, background thread writes
+    frame_queue = queue.Queue(maxsize=120)
+    shared_status = {"label": None, "conf": 0.0, "predictions": []}
 
+    # ── Background thread: EfficientNet + BiLSTM ──────────────────────────────
+    def background_lstm_worker():
+        all_feats = []
+        while True:
+            item = frame_queue.get()
+            if item is None:          # poison pill — time to stop
+                break
+            frame_rgb, _ = item
+            with torch.no_grad():
+                x = xform(frame_rgb).unsqueeze(0).to(dev)
+                feat = effnet(x).cpu().numpy().flatten()
+            all_feats.append(feat)
+
+            # rolling BiLSTM window — update verdict without blocking main thread
+            if bilstm and len(all_feats) >= SEQ_LEN and len(all_feats) % max(SEQ_STRIDE // 2, 1) == 0:
+                with torch.no_grad():
+                    seq = torch.FloatTensor(np.array(all_feats[-SEQ_LEN:])[np.newaxis]).to(dev)
+                    logits, _ = bilstm(seq)
+                    probs = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
+                shared_status["label"] = BEHAVIOR_CLASSES[int(np.argmax(probs))]
+                shared_status["conf"] = float(np.max(probs))
+
+            frame_queue.task_done()
+
+        # final full-sequence classification for the end report
+        if bilstm and all_feats:
+            shared_status["predictions"] = _classify_sequences(bilstm, all_feats, dev)
+
+    bg_thread = threading.Thread(target=background_lstm_worker, daemon=True)
+    bg_thread.start()
+
+    # ── Main thread: YOLO + video I/O + Streamlit UI ──────────────────────────
+    persons_max = 0
+    yolo_shop_confs = []
+    product_events = set()
     video_writer = None
     if visual_out_path:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -370,7 +403,6 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
 
     frame_num = 0
     last_yolo = None
-    live_label, live_conf = None, 0.0
     live_timeline = []
 
     while True:
@@ -380,9 +412,9 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
 
         if progress_cb and frame_num % 90 == 0:
             pct = min(0.05 + (frame_num / max(total_frames, 1)) * 0.65, 0.70)
-            cb(pct, f"Frame {frame_num}/{total_frames}...")
+            cb(pct, f"Analyzing: Frame {frame_num}/{total_frames}")
 
-        # run YOLO every 2nd frame, reuse on the skipped frame
+        # YOLO is fast enough to stay in the main thread
         if frame_num % 2 == 1 or last_yolo is None:
             last_yolo = yolo_model.track(
                 frame, conf=YOLO_CONF, iou=YOLO_IOU,
@@ -390,8 +422,8 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
                 device=0 if str(dev) == "cuda" else "cpu"
             )[0]
 
-        person_boxes = {}   # track_id -> xyxy box
-        prod_boxes = []     # (cls_name, xyxy) product interactions
+        person_boxes = {}
+        prod_boxes = []
 
         if last_yolo.boxes is not None:
             ids = (last_yolo.boxes.id.int().tolist()
@@ -417,7 +449,6 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
 
         persons_max = max(persons_max, len(person_boxes))
 
-        # check proximity of person to product (person within 1.2x their own height)
         for pid, pbox in person_boxes.items():
             px1, py1, px2, py2 = pbox
             ph = max(py2 - py1, 1)
@@ -428,32 +459,26 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
                 if dist < ph * 1.2:
                     product_events.add((pid, cls_name))
 
-        # extract CNN features every 4th frame (balances accuracy vs speed)
+        # every 4th frame: toss into the queue for the background thread — don't wait
         if frame_num % 4 == 0:
-            with torch.no_grad():
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                x = xform(rgb).unsqueeze(0).to(dev)
-                feat = effnet(x).cpu().numpy().flatten()
-            all_feats.append(feat)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if not frame_queue.full():
+                frame_queue.put((rgb.copy(), frame_num))
 
-            # rolling BiLSTM: update live label once per stride
-            if bilstm and len(all_feats) >= SEQ_LEN and len(all_feats) % max(SEQ_STRIDE//2, 1) == 0:
-                with torch.no_grad():
-                    seq = torch.FloatTensor(np.array(all_feats[-SEQ_LEN:])[np.newaxis]).to(dev)
-                    logits, _ = bilstm(seq)
-                    probs = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
-                live_label = BEHAVIOR_CLASSES[int(np.argmax(probs))]
-                live_conf = float(np.max(probs))
+        # draw + update UI using the latest verdict from the background thread
+        live_label = shared_status["label"]
+        live_conf = shared_status["conf"]
 
-        # draw annotation and emit live frame callback
         if video_writer or live_cb:
             ann = _draw_frame(frame, last_yolo, yolo_model, is_4cls,
                                live_label, live_conf, frame_num, total_frames)
             if video_writer:
                 video_writer.write(ann)
-            if live_cb and frame_num % 30 == 0:
-                tl_col = "red" if live_label == "shoplifting" else "green" if live_label else "gray"
-                live_timeline.append(tl_col)
+            # update UI every 2 frames — smooth because we're not blocked on CNN
+            if live_cb and frame_num % 2 == 0:
+                if frame_num % 30 == 0:
+                    tl_col = "red" if live_label == "shoplifting" else "green" if live_label else "gray"
+                    live_timeline.append(tl_col)
                 live_cb(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB), frame_num, total_frames, {
                     "persons_tracked": persons_max,
                     "products_detected": len({c for _, c in product_events}),
@@ -464,9 +489,16 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
 
     if video_writer: video_writer.release()
     cap.release()
-    duration = frame_num / fps
 
-    if not all_feats:
+    cb(0.85, "Finalizing deep learning sequences...")
+    # signal background thread to stop, wait for it to finish its last window
+    frame_queue.put(None)
+    bg_thread.join()
+
+    duration = frame_num / fps
+    predictions = shared_status["predictions"]
+
+    if not predictions and not yolo_shop_confs:
         return {
             "success": True, "early_exit": True,
             "early_exit_reason": f"Video too short ({frame_num} frames) — classified as normal.",
@@ -481,9 +513,6 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
                             "requires_review": False, "flags": []},
             "alert": None, "model_trained": BILSTM_PATH.exists(),
         }
-
-    cb(0.72, "Running BiLSTM temporal classification...")
-    predictions = _classify_sequences(bilstm, all_feats, dev) if bilstm else []
 
     cb(0.90, "Computing intent score...")
     product_pickups = {}
@@ -514,7 +543,7 @@ def run_pipeline(video_path, progress_cb=None, visual_out_path=None, live_cb=Non
         "detections": {"persons_tracked": persons_max,
                        "products_detected": len({c for _, c in product_events}),
                        "interactions": len([p for p in predictions if p["behavior_type"] == "shoplifting"]),
-                       "frames_processed": len(all_feats)},
+                       "frames_processed": len(predictions)},
         "product_pickups": product_pickups,
         "behavior_events": [{"behavior_type": p["behavior_type"], "start_time": p["start"],
                               "end_time": p["end"], "confidence": p["confidence"],
