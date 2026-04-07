@@ -1,7 +1,7 @@
 {
   "backbone": "efficientnet_v2_s",
   "feat_dim": 1280,
-  "best_val_acc": 0.986563056499919,
+  "best_val_acc": 0.9953004005340454,
   "classes": [
     "normal",
     "shoplifting"

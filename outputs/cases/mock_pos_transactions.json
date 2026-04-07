@@ -2,7 +2,7 @@
   "sessions": [
     {
       "session_id": "TXN-0001",
-      "timestamp": "2026-04-06T08:05:22.371476",
+      "timestamp": "2026-04-07T11:22:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -16,7 +16,7 @@
     },
     {
       "session_id": "TXN-0002",
-      "timestamp": "2026-04-06T07:13:22.371476",
+      "timestamp": "2026-04-07T10:30:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -35,7 +35,7 @@
     },
     {
       "session_id": "TXN-0003",
-      "timestamp": "2026-04-06T12:21:22.371476",
+      "timestamp": "2026-04-07T15:38:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -59,7 +59,7 @@
     },
     {
       "session_id": "TXN-0004",
-      "timestamp": "2026-04-06T09:56:22.371476",
+      "timestamp": "2026-04-07T13:13:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -73,7 +73,7 @@
     },
     {
       "session_id": "TXN-0005",
-      "timestamp": "2026-04-06T12:45:22.371476",
+      "timestamp": "2026-04-07T16:02:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -87,7 +87,7 @@
     },
     {
       "session_id": "TXN-0006",
-      "timestamp": "2026-04-06T09:14:22.371476",
+      "timestamp": "2026-04-07T12:31:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -111,7 +111,7 @@
     },
     {
       "session_id": "TXN-0007",
-      "timestamp": "2026-04-06T08:00:22.371476",
+      "timestamp": "2026-04-07T11:17:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -135,7 +135,7 @@
     },
     {
       "session_id": "TXN-0008",
-      "timestamp": "2026-04-06T09:43:22.371476",
+      "timestamp": "2026-04-07T13:00:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -159,7 +159,7 @@
     },
     {
       "session_id": "TXN-0009",
-      "timestamp": "2026-04-06T07:35:22.371476",
+      "timestamp": "2026-04-07T10:52:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -178,7 +178,7 @@
     },
     {
       "session_id": "TXN-0010",
-      "timestamp": "2026-04-06T12:13:22.371476",
+      "timestamp": "2026-04-07T15:30:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -192,7 +192,7 @@
     },
     {
       "session_id": "TXN-0011",
-      "timestamp": "2026-04-06T12:40:22.371476",
+      "timestamp": "2026-04-07T15:57:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -206,7 +206,7 @@
     },
     {
       "session_id": "TXN-0012",
-      "timestamp": "2026-04-06T12:43:22.371476",
+      "timestamp": "2026-04-07T16:00:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -225,7 +225,7 @@
     },
     {
       "session_id": "TXN-0013",
-      "timestamp": "2026-04-06T06:39:22.371476",
+      "timestamp": "2026-04-07T09:56:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -239,7 +239,7 @@
     },
     {
       "session_id": "TXN-0014",
-      "timestamp": "2026-04-06T08:58:22.371476",
+      "timestamp": "2026-04-07T12:15:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -253,7 +253,7 @@
     },
     {
       "session_id": "TXN-0015",
-      "timestamp": "2026-04-06T12:52:22.371476",
+      "timestamp": "2026-04-07T16:09:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -277,7 +277,7 @@
     },
     {
       "session_id": "TXN-0016",
-      "timestamp": "2026-04-06T11:54:22.371476",
+      "timestamp": "2026-04-07T15:11:23.988865",
       "items_billed": 3,
       "items": [
         {
@@ -301,7 +301,7 @@
     },
     {
       "session_id": "TXN-0017",
-      "timestamp": "2026-04-06T11:36:22.371476",
+      "timestamp": "2026-04-07T14:53:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -320,7 +320,7 @@
     },
     {
       "session_id": "TXN-0018",
-      "timestamp": "2026-04-06T06:09:22.371476",
+      "timestamp": "2026-04-07T09:26:23.988865",
       "items_billed": 1,
       "items": [
         {
@@ -334,7 +334,7 @@
     },
     {
       "session_id": "TXN-0019",
-      "timestamp": "2026-04-06T11:10:22.371476",
+      "timestamp": "2026-04-07T14:27:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -353,7 +353,7 @@
     },
     {
       "session_id": "TXN-0020",
-      "timestamp": "2026-04-06T10:23:22.371476",
+      "timestamp": "2026-04-07T13:40:23.988865",
       "items_billed": 2,
       "items": [
         {
@@ -372,7 +372,7 @@
     },
     {
       "session_id": "TXN-SUSP-001",
-      "timestamp": "2026-04-06T13:32:22.371476",
+      "timestamp": "2026-04-07T16:49:23.988865",
       "items_billed": 2,
       "items_detected_on_camera": 5,
       "discrepancy": 3,
@@ -380,5 +380,5 @@
       "flag_reason": "5 items detected by camera but only 2 scanned at POS"
     }
   ],
-  "generated_at": "2026-04-06T13:32:22.371476"
+  "generated_at": "2026-04-07T16:49:23.989866"
 }

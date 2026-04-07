@@ -1,6 +1,6 @@
 {
   "backbone": "efficientnet_v2_s",
-  "best_val_acc": 0.9961977186311787,
+  "best_val_acc": 0.9438775510204082,
   "seq_len": 45,
   "hidden": 256,
   "layers": 2,
