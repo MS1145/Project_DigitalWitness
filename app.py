@@ -102,8 +102,7 @@ class TemporalAttention(nn.Module):
     """Learns which frames in a sequence matter most — output weights are the XAI signal."""
     def __init__(self, dim):
         super().__init__()
-        # two-layer MLP gives more expressive attention than a single linear
-        self.attn = nn.Sequential(nn.Linear(dim, dim//2), nn.Tanh(), nn.Linear(dim//2, 1))
+        self.attn = nn.Linear(dim, 1)
 
     def forward(self, lstm_out):
         scores = self.attn(lstm_out).squeeze(-1)
@@ -128,7 +127,13 @@ class BiLSTMClassifier(nn.Module):
         self.bilstm = nn.LSTM(feat_dim, hidden, layers, batch_first=True,
                               bidirectional=True, dropout=dropout if layers > 1 else 0.0)
         self.attention = TemporalAttention(hidden * 2)
-        self.classifier = nn.Linear(hidden * 2, len(BEHAVIOR_CLASSES))
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(hidden * 2),
+            nn.ReLU(),
+            nn.Linear(hidden * 2, hidden // 2),
+            nn.ReLU(),
+            nn.Linear(hidden // 2, len(BEHAVIOR_CLASSES)),
+        )
 
     def forward(self, x):
         out, _ = self.bilstm(x)
@@ -161,7 +166,7 @@ def load_bilstm():
         hidden=cfg.get("hidden_dim", 256),
         layers=cfg.get("num_layers", 2),
     )
-    m.load_state_dict(sd)
+    m.load_state_dict(sd, strict=False)
     return m.eval()
 
 
