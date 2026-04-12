@@ -10,8 +10,10 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict, Counter
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 # ─── Page config (must be first Streamlit call) ───────────────────────────────
 st.set_page_config(
@@ -111,17 +113,7 @@ def _get_device():
 
 
 def _build_mobilenet_extractor():
-    """
-    Load MobileNetV2 feature extractor matching notebook Cell 4 architecture.
-
-    State dict keys (from mobilenet_dw.pt → 'state_dict'):
-      features.*    → MobileNetV2 backbone (layers 0-18)
-      pool.*        → AdaptiveAvgPool2d (no params)
-      classifier.*  → Linear(1280,512) → ReLU → Dropout → Linear(512,2)
-
-    Only features + pool are used here — classifier head is discarded.
-    extract_features() returns the 1280-dim vector used as BiLSTM input.
-    """
+    """MobileNetV2 feature extractor (Cell 4). extract_features() → 1280-dim vector."""
     import torch.nn as nn
     from torchvision import models
     from torchvision.models import MobileNet_V2_Weights
@@ -155,18 +147,7 @@ def _build_mobilenet_extractor():
 
 
 def _build_bilstm(num_classes=2, hidden=256, layers=2, dropout=0.3):
-    """
-    BiLSTMAttentionClassifier — matches exact notebook Cell 5 architecture.
-
-    State dict keys (from bilstm_dw.pt → 'state_dict'):
-      bilstm.*            → nn.LSTM bidirectional
-      attention.attn.0.*  → Linear(hidden*2, hidden)  [Tanh has no params]
-      attention.attn.2.*  → Linear(hidden, 1)
-      dropout             → no params
-      classifier.*        → Linear(hidden*2, num_classes)
-
-    Input: (B, T=45, 1280) pre-extracted MobileNetV2 feature sequences.
-    """
+    """BiLSTMAttentionClassifier (Cell 5). Input: (B, T=45, 1280) feature sequences."""
     import torch
     import torch.nn as nn
 
@@ -298,9 +279,7 @@ def run_pipeline(video_path, progress_callback=None,
     _cb(0.02, f"YOLO model: {_mode} ({Path(yolo_path).name}) — "
               f"classes: {sorted(_yolo_names)[:6]}...")
 
-    # ── Load MobileNetV2 feature extractor (mobilenet_dw.pt) ──
-    # Uses the fine-tuned weights from notebook Cell 4 — critical for accuracy.
-    # Features extracted here are what the BiLSTM was trained on.
+    # ── Load MobileNetV2 feature extractor ──
     mnet_model = _build_mobilenet_extractor().to(dev)
     mnet_path  = MODELS_DIR / "mobilenet_dw.pt"
     if mnet_path.exists():
@@ -309,8 +288,7 @@ def run_pipeline(video_path, progress_callback=None,
         mnet_model.load_state_dict(sd)
     mnet_model.eval()
 
-    # ── Load BiLSTM classifier (bilstm_dw.pt) ──
-    # Architecture matches notebook Cell 5 BiLSTMAttentionClassifier exactly.
+    # ── Load BiLSTM classifier ──
     lstm_classes  = BEHAVIOR_CLASSES
     bilstm_model  = _build_bilstm(num_classes=len(lstm_classes), hidden=256,
                                    layers=2, dropout=0.3).to(dev)
@@ -330,50 +308,29 @@ def run_pipeline(video_path, progress_callback=None,
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    # 4-class behaviour model — ALL detections are person-level behaviour labels.
-    # There is no separate "person" class; each box is one of these four.
     BEHAVIOUR_4CLS = {"Looking around", "Picking-Holding", "normal", "shoplifting"}
-    # Suspicious classes used for intent scoring
     SUSPICIOUS_CLS = {"Looking around", "shoplifting"}
-    # Product-interaction class (replaces the old product proximity logic)
     PRODUCT_CLS    = {"Picking-Holding"}
 
     def _early_exit_normal(reason, f_num, f_total, fps, w, h):
-        """Return a lightweight normal result when video is too short to run BiLSTM."""
+        """Lightweight normal result for videos too short to run BiLSTM."""
         return {
-            "success"       : True,
-            "early_exit"    : True,
-            "early_exit_reason": reason,
-            "video_metadata": {
-                "filename"   : Path(video_path).name,
-                "duration"   : f_num / max(fps, 1),
-                "fps"        : fps,
-                "width"      : w,
-                "height"     : h,
-                "frame_count": f_total,
-            },
-            "lstm_detection": {
-                "classification": "normal",
-                "confidence"    : 1.0,
-                "is_shoplifting": False,
-            },
-            "detections": {
-                "persons_tracked"  : 0,
-                "products_detected": 0,
-                "interactions"     : 0,
-                "frames_processed" : f_num,
-            },
-            "product_pickups"  : {},
-            "behavior_events"  : [],
-            "intent_score"     : {"score": 0.0, "severity": "NONE",
-                                  "components": {}, "explanation": reason},
-            "quality_analysis" : {"reliability_score": 1.0,
-                                  "detection_rate": 1.0, "usable": True},
-            "bias_report"      : {"overall_fairness_score": 1.0,
-                                  "analysis_reliable": True,
-                                  "requires_review": False, "flags": []},
-            "alert"            : None,
-            "model_trained"    : LSTM_PATH.exists(),
+            "success": True, "early_exit": True, "early_exit_reason": reason,
+            "video_metadata": {"filename": Path(video_path).name,
+                               "duration": f_num / max(fps, 1), "fps": fps,
+                               "width": w, "height": h, "frame_count": f_total},
+            "lstm_detection": {"classification": "normal", "confidence": 1.0,
+                               "is_shoplifting": False},
+            "detections": {"persons_tracked": 0, "products_detected": 0,
+                           "interactions": 0, "frames_processed": f_num},
+            "product_pickups": {}, "behavior_events": [],
+            "intent_score": {"score": 0.0, "severity": "NONE",
+                             "components": {}, "explanation": reason},
+            "quality_analysis": {"reliability_score": 1.0, "detection_rate": 1.0,
+                                 "usable": True},
+            "bias_report": {"overall_fairness_score": 1.0, "analysis_reliable": True,
+                            "requires_review": False, "flags": []},
+            "alert": None, "model_trained": LSTM_PATH.exists(),
         }
 
     # ── Video processing ──
@@ -393,7 +350,11 @@ def run_pipeline(video_path, progress_callback=None,
     # product pickup: set of (person_track_id, product_class) — one entry per
     # unique person×product pair that were in close proximity
     product_pickup_events = set()
-    yolo_shop_confs = []   # per-frame peak YOLO shoplifting confidence (IS_4CLS only)
+    yolo_shop_confs  = []  # per-frame peak YOLO "shoplifting" confidence (IS_4CLS only)
+    yolo_susp_confs  = []  # per-frame peak YOLO suspicious confidence (shoplifting + Looking around)
+    yolo_frame_labels = [] # (frame_num, dominant_class, confidence) — all 4 classes
+    # Class priority for picking dominant label when multiple boxes exist per frame
+    _YOLO_PRIORITY = {"shoplifting": 3, "Looking around": 2, "Picking-Holding": 1, "normal": 0}
     frame_num    = 0
     feat_step    = 4   # extract CNN features every 4th frame (speed)
     yolo_step    = 2   # run YOLO every 2nd frame; reuse last result otherwise
@@ -404,7 +365,7 @@ def run_pipeline(video_path, progress_callback=None,
     last_live_label  = None
     last_live_conf   = 0.0
     live_timeline    = []
-    _live_step       = 30       # update live preview every N frames
+    _live_step       = 15       # update live preview every N frames (~2fps at 30fps source)
     if visual_out_path:
         _fourcc      = cv2.VideoWriter_fourcc(*"mp4v")
         video_writer = cv2.VideoWriter(
@@ -457,12 +418,7 @@ def run_pipeline(video_path, progress_callback=None,
                         product_pickup_events.add((tid, cls_name))
                 else:
                     # ── COCO / retail / unknown model fallback ───────────────
-                    # Person detection strategy (in priority order):
-                    #  1. Class ID 0  — always "person" in any COCO-based model
-                    #  2. Class name "person" (case-insensitive)
-                    #  3. Name starts with "person" (e.g. "person-picking-up")
-                    #  4. Unknown model with no "person" class — treat ALL boxes
-                    #     as persons so tracking is never silently broken
+                    # Person: class-id 0, name "person*", or all boxes if unknown model.
                     cls_id_int = int(cls_id)
                     is_person  = (
                         cls_id_int == 0                          # COCO class 0 = person
@@ -486,43 +442,40 @@ def run_pipeline(video_path, progress_callback=None,
                         products_set.add(cls_name)
                         frame_product_boxes.append((cls_name, box_t))
 
-        # Update max concurrent persons.
-        # Count ALL entries — negative IDs are legitimate detections from frames
-        # where ByteTrack hasn't yet established tracks (first few frames, or
-        # low-confidence scenes). Filtering by k >= 0 was silently zeroing the
-        # count whenever ByteTrack was unavailable.
+        # Update peak person count (negative IDs = valid pre-track detections).
         real_person_count = len(frame_person_boxes)
         if real_person_count > max_concurrent_persons:
             max_concurrent_persons = real_person_count
 
-        # ── Current-frame YOLO signal (used for live badge priority) ──────────
-        # If YOLO detects "shoplifting" or "Looking around" in this frame the
-        # badge should reflect that immediately — the BiLSTM needs 45 frames of
-        # history before it can output a verdict, so YOLO acts as the early
-        # warning while LSTM provides the confirmed temporal classification.
+        # ── Current-frame YOLO signal — all 4 classes ────────────────────────
+        # Pick the highest-priority class detected in this frame.
+        # Priority: shoplifting > Looking around > Picking-Holding > normal
         frame_yolo_label = None
         frame_yolo_conf  = 0.0
         if results.boxes is not None and IS_4CLS_MODEL:
             for _cls_v, _cof_v in zip(results.boxes.cls.cpu().numpy(),
                                        results.boxes.conf.cpu().numpy()):
-                _cn = yolo_model.names[int(_cls_v)]
-                if _cn == "shoplifting":
-                    if float(_cof_v) > frame_yolo_conf:
-                        frame_yolo_label = "shoplifting"
-                        frame_yolo_conf  = float(_cof_v)
-                elif _cn == "Looking around" and frame_yolo_label != "shoplifting":
-                    if float(_cof_v) > frame_yolo_conf:
-                        frame_yolo_label = "Looking around"
-                        frame_yolo_conf  = float(_cof_v)
+                _cn  = yolo_model.names[int(_cls_v)]
+                _pri = _YOLO_PRIORITY.get(_cn, -1)
+                _cur = _YOLO_PRIORITY.get(frame_yolo_label, -1)
+                if _pri > _cur or (_pri == _cur and float(_cof_v) > frame_yolo_conf):
+                    frame_yolo_label = _cn
+                    frame_yolo_conf  = float(_cof_v)
 
-        # Accumulate YOLO shoplifting confidence for final classification
+        # Record the dominant label for this frame (used for timeline + vote counts)
+        if frame_yolo_label:
+            yolo_frame_labels.append((frame_num, frame_yolo_label, frame_yolo_conf))
+
+        # Accumulate per-class confidence lists for majority vote
         if frame_yolo_label == "shoplifting":
             yolo_shop_confs.append(frame_yolo_conf)
+        if frame_yolo_label in {"shoplifting", "Looking around"}:
+            yolo_susp_confs.append(frame_yolo_conf)
 
-        # Choose badge: YOLO live detection takes priority over LSTM when YOLO
-        # sees something suspicious; otherwise fall back to LSTM temporal verdict.
+        # Live badge: show YOLO label only when confidence is meaningful (≥50%).
+        # Sub-threshold detections fall back to the LSTM rolling verdict.
         _SUSP = {"shoplifting", "Looking around"}
-        if frame_yolo_label in _SUSP:
+        if frame_yolo_label in _SUSP and frame_yolo_conf >= 0.50:
             badge_label = frame_yolo_label
             badge_conf  = frame_yolo_conf
         elif last_live_label:
@@ -533,59 +486,56 @@ def run_pipeline(video_path, progress_callback=None,
             badge_conf  = 0.0
 
         # ── Frame annotation (visual output + live preview) ───────────────────
-        if video_writer or live_frame_callback:
+        # Only annotate on frames where we actually need output to avoid wasted work.
+        _need_live    = live_frame_callback and frame_num % _live_step == 0
+        _need_write   = bool(video_writer)
+        if _need_write or _need_live:
             ann = frame.copy()
-            # Draw bounding boxes + labels for every YOLO detection
+            # Draw bounding boxes only on YOLO frames (reused frames get clean boxes)
             if results.boxes is not None:
-                for box_t, cls_id_v, conf_v in zip(
-                        results.boxes.xyxy.cpu().numpy(),
-                        results.boxes.cls.cpu().numpy(),
-                        results.boxes.conf.cpu().numpy()):
+                _boxes_np = results.boxes.xyxy.cpu().numpy()
+                _cls_np   = results.boxes.cls.cpu().numpy()
+                _conf_np  = results.boxes.conf.cpu().numpy()
+                for box_t, cls_id_v, conf_v in zip(_boxes_np, _cls_np, _conf_np):
                     x1, y1, x2, y2 = map(int, box_t)
                     cn_v = yolo_model.names[int(cls_id_v)]
                     if IS_4CLS_MODEL:
-                        if cn_v == "shoplifting":
-                            col_v = (0, 0, 220)      # red  (BGR)
-                        elif cn_v == "Looking around":
-                            col_v = (0, 140, 255)    # orange
-                        elif cn_v == "Picking-Holding":
-                            col_v = (0, 200, 255)    # yellow
-                        else:                        # normal
-                            col_v = (0, 200, 0)      # green
-                        lbl_v = f"{cn_v} {conf_v:.0%}"
+                        # Only colour shoplifting red when it meets the 50% classification
+                        # threshold — below that it won't affect the verdict so show green.
+                        if cn_v == "shoplifting" and conf_v < 0.50:
+                            col_v = (0, 200, 0)        # green — below threshold
+                            lbl_v = f"normal {conf_v:.0%}"
+                        else:
+                            col_v = ({"shoplifting": (0, 0, 220),
+                                      "Looking around": (0, 140, 255),
+                                      "Picking-Holding": (0, 200, 255)}
+                                     .get(cn_v, (0, 200, 0)))
+                            lbl_v = f"{cn_v} {conf_v:.0%}"
                     else:
                         is_p  = int(cls_id_v) == 0 or cn_v.lower() == "person"
                         col_v = (0, 200, 0) if is_p else (160, 160, 160)
                         lbl_v = f"Person {conf_v:.0%}" if is_p else f"{cn_v} {conf_v:.0%}"
-                    # Bounding box
                     cv2.rectangle(ann, (x1, y1), (x2, y2), col_v, 2)
-                    # Label background pill above the box
                     (tw, th), _ = cv2.getTextSize(lbl_v, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                     lbl_y = max(y1 - 4, th + 6)
-                    cv2.rectangle(ann, (x1, lbl_y - th - 6), (x1 + tw + 8, lbl_y + 2),
-                                  col_v, -1)
+                    cv2.rectangle(ann, (x1, lbl_y - th - 6), (x1 + tw + 8, lbl_y + 2), col_v, -1)
                     cv2.putText(ann, lbl_v, (x1 + 4, lbl_y - 2),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-            # Draw classification badge - YOLO live signal takes priority,
-            # falls back to LSTM temporal verdict once sequence is long enough.
-            if badge_label:
-                b_col = ((0, 0, 200)   if badge_label == "shoplifting" else
-                         (0, 140, 255) if badge_label == "Looking around" else
-                         (20, 140, 20))
-                b_txt = f"{badge_label.upper()}  {badge_conf:.0%}"
-                (tw_b, th_b), _ = cv2.getTextSize(b_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
-                cv2.rectangle(ann, (8, 8), (tw_b + 18, th_b + 22), b_col, -1)
-                cv2.putText(ann, b_txt, (12, th_b + 16),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-            # Frame counter bottom-left
             cv2.putText(ann, f"{frame_num}/{total_f}", (8, ann.shape[0] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
-            # Write to VideoWriter
-            if video_writer:
+            if _need_write:
                 video_writer.write(ann)
-            # Live callback every _live_step frames
-            if live_frame_callback and frame_num % _live_step == 0:
-                ann_rgb = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
+            if _need_live:
+                # Downscale to max 480px wide before sending to browser — reduces
+                # websocket payload ~4× for typical 1080p/720p source footage
+                _h, _w = ann.shape[:2]
+                if _w > 480:
+                    _s   = 480 / _w
+                    _ann_small = cv2.resize(ann, (480, int(_h * _s)),
+                                            interpolation=cv2.INTER_AREA)
+                else:
+                    _ann_small = ann
+                ann_rgb  = cv2.cvtColor(_ann_small, cv2.COLOR_BGR2RGB)
                 tl_color = ("red"   if badge_label in {"shoplifting", "Looking around"} else
                              "green" if badge_label == "normal" else "gray")
                 live_timeline.append(tl_color)
@@ -650,6 +600,27 @@ def run_pipeline(video_path, progress_callback=None,
     # Distinct product classes actually interacted with (not all visible products)
     products_interacted = len({cls for (_, cls) in product_pickup_events})
 
+    # ── YOLO 30-frame segment timeline ───────────────────────────────────────
+    YOLO_SEG_FRAMES = 30
+    yolo_segments   = []
+    if yolo_frame_labels:
+        seg_map = defaultdict(list)
+        for fn, lbl, conf in yolo_frame_labels:
+            seg_map[fn // YOLO_SEG_FRAMES].append((lbl, conf))
+        for seg_idx in sorted(seg_map.keys()):
+            entries       = seg_map[seg_idx]
+            dominant      = max(entries, key=lambda x: (_YOLO_PRIORITY.get(x[0], 0), x[1]))
+            avg_conf      = float(np.mean([c for _, c in entries]))
+            shop_in_seg   = [c for lbl, c in entries if lbl == "shoplifting"]
+            max_shop_conf = max(shop_in_seg) if shop_in_seg else 0.0
+            yolo_segments.append({
+                "start_time"   : seg_idx * YOLO_SEG_FRAMES / fps_val,
+                "end_time"     : min((seg_idx + 1) * YOLO_SEG_FRAMES / fps_val, duration),
+                "class"        : dominant[0],
+                "confidence"   : avg_conf,
+                "max_shop_conf": max_shop_conf,
+            })
+
     _cb(0.72, "Running LSTM temporal classification...")
 
     # ── Sliding-window BiLSTM classification ──
@@ -662,11 +633,7 @@ def run_pipeline(video_path, progress_callback=None,
         x_t = torch.FloatTensor(seq[np.newaxis]).to(dev)
         with torch.no_grad():
             logits, _ = bilstm_model(x_t)
-        # T=3.0 temperature scaling: divides logits before softmax to flatten
-        # overconfident distributions, giving natural variation in output values.
-        # Sequence-length scale penalises very short clips.
-        # Hard cap at 0.99 only — prevents displaying a literal "100%" but
-        # never artificially compresses results to a fixed ceiling.
+        # Temperature=3.0: flattens overconfident distributions; scale penalises short clips.
         TEMP = 3.0
         probs    = torch.softmax(logits / TEMP, dim=1).cpu().numpy()[0]
         scale    = min(1.0, len(all_feats) / LSTM_SEQ_LEN)
@@ -686,79 +653,75 @@ def run_pipeline(video_path, progress_callback=None,
                 logits, _ = bilstm_model(x_t)
                 probs     = torch.softmax(logits / 3.0, dim=1).cpu().numpy()[0]
             predictions.append({
-                "start"        : start / fps_val,
-                "end"          : (start + LSTM_SEQ_LEN) / fps_val,
+                "start"        : start * feat_step / fps_val,
+                "end"          : (start + LSTM_SEQ_LEN) * feat_step / fps_val,
                 "behavior_type": lstm_classes[int(np.argmax(probs))],
                 "confidence"   : min(float(np.max(probs)), 0.99),
                 "probabilities": {c: float(p) for c, p in zip(lstm_classes, probs)},
             })
 
-    _cb(0.85, "Aggregating predictions...")
+    _cb(0.85, "Classifying...")
 
-    shop_preds = [p for p in predictions if p["behavior_type"] == "shoplifting"]
     norm_preds = [p for p in predictions if p["behavior_type"] == "normal"]
 
-    # Priority aggregation:
-    # If ANY window shows shoplifting at >= SHOP_MIN_CONF that is the final result.
-    # A few seconds of normal behaviour at the end of a video cannot override
-    # sustained high-confidence shoplifting detected earlier in the footage.
-    #
-    # YOLO override: the YOLO model flags behaviour per-frame before the LSTM
-    # has enough history. If YOLO repeatedly detected shoplifting at high
-    # confidence, trust that signal even when the LSTM says normal.
-    SHOP_MIN_CONF  = 0.55
-    peak_shop_conf = max((p["confidence"] for p in shop_preds), default=0.0)
-    yolo_peak      = max(yolo_shop_confs, default=0.0)
-    yolo_mean      = (sum(yolo_shop_confs) / len(yolo_shop_confs)
-                      if yolo_shop_confs else 0.0)
-    yolo_override  = (yolo_peak >= 0.60 or
-                      (yolo_mean >= 0.50 and len(yolo_shop_confs) >= 3))
+    yolo_peak = max(yolo_shop_confs, default=0.0)
+    yolo_mean = (sum(yolo_shop_confs) / len(yolo_shop_confs) if yolo_shop_confs else 0.0)
 
-    if yolo_override or peak_shop_conf >= SHOP_MIN_CONF:
-        # Use YOLO peak confidence when it's higher than the LSTM's best window
-        best          = max(shop_preds, key=lambda p: p["confidence"]) if shop_preds else None
+    # ── Clean single-rule classification ─────────────────────────────────────
+    # Rule: look at the single highest shoplifting confidence across all frames.
+    #   ≥ 70%  → SHOPLIFTING  (clear signal)
+    #   50–69% → REVIEW       (ambiguous — needs human review)
+    #   < 50%  → NORMAL       (no credible signal)
+    SHOP_THRESHOLD   = 0.70
+    REVIEW_THRESHOLD = 0.50
+
+    # Individual frames ≥50% for XAI evidence scatter chart
+    yolo_shop_moments = sorted(
+        [{"time": round(fn / fps_val, 2), "conf": round(conf, 3)}
+         for fn, lbl, conf in yolo_frame_labels
+         if lbl == "shoplifting" and conf >= REVIEW_THRESHOLD],
+        key=lambda x: x["time"],
+    )
+
+    # Segments above review threshold (for stats display)
+    shop_segs = [s for s in yolo_segments
+                 if s.get("max_shop_conf", 0.0) >= REVIEW_THRESHOLD]
+
+    if yolo_peak >= SHOP_THRESHOLD:
         overall_class = "shoplifting"
-        overall_conf  = max(
-            best["confidence"] if best else 0.0,
-            min(yolo_peak, 0.99)
-        )
-    elif shop_preds:
-        # Below threshold but some shoplifting windows exist — use weight ratio
-        shop_w  = sum(p["confidence"] for p in shop_preds) * 2.0
-        norm_w  = sum(p["confidence"] for p in norm_preds)
-        total_w = shop_w + norm_w
-        if total_w > 0 and shop_w / total_w > 0.3:
-            best          = max(shop_preds, key=lambda p: p["confidence"])
-            overall_class = "shoplifting"
-            overall_conf  = best["confidence"]
-        else:
-            overall_class = "normal"
-            overall_conf  = (np.mean([p["confidence"] for p in norm_preds])
-                             if norm_preds else 0.5)
+        overall_conf  = min(yolo_peak, 0.99)
+    elif yolo_peak >= REVIEW_THRESHOLD:
+        overall_class = "review"
+        overall_conf  = min(yolo_peak, 0.99)
     else:
         overall_class = "normal"
-        overall_conf  = (np.mean([p["confidence"] for p in norm_preds])
-                         if norm_preds else 0.5)
+        overall_conf  = min(
+            float(np.mean([p["confidence"] for p in norm_preds])) if norm_preds else 0.5,
+            0.99,
+        )
 
     _cb(0.90, "Scoring intent...")
 
-    # ── Intent scoring (video-only, no POS) ──
-    # With 4-class model: "shoplifting" = direct detection, "Looking around" = recon.
-    # No "concealment" or "bypass" classes exist — map to closest equivalents.
+    # ── Intent scoring ────────────────────────────────────────────────────────
     direct_e  = [p for p in predictions if p["behavior_type"] == "shoplifting"]
     recon_e   = [p for p in predictions if p["behavior_type"] == "Looking around"]
     susp_e    = direct_e + recon_e
 
-    # s_conceal: weighted by direct shoplifting confidence (primary signal)
-    s_conceal = (np.mean([e["confidence"] for e in direct_e])
-                 * min(1.0, len(direct_e) / 3.0)) if direct_e else 0.0
-    # s_bypass: reconnaissance behaviour is the closest proxy for bypass intent
-    s_bypass  = (np.mean([e["confidence"] for e in recon_e])
-                 * min(1.0, len(recon_e) / 3.0)) if recon_e else 0.0
-    susp_secs = sum(e["end"] - e["start"] for e in susp_e)
-    s_dur     = min(1.0, (susp_secs / max(1.0, duration)) * 3.0) if susp_e else 0.0
-
-    raw_score = 0.50 * s_conceal + 0.35 * s_bypass + 0.15 * s_dur
+    if overall_class in {"shoplifting", "review"}:
+        _n_segs    = len(shop_segs)
+        _sustained = min(_n_segs / 5.0, 1.0)   # 5+ qualifying segments → full score
+        raw_score  = min(yolo_peak * (0.5 + 0.5 * _sustained), 1.0)
+        s_conceal  = yolo_peak
+        s_bypass   = 0.0
+        s_dur      = _sustained
+    else:
+        s_conceal = (np.mean([e["confidence"] for e in direct_e])
+                     * min(1.0, len(direct_e) / 3.0)) if direct_e else 0.0
+        s_bypass  = (np.mean([e["confidence"] for e in recon_e])
+                     * min(1.0, len(recon_e) / 3.0)) if recon_e else 0.0
+        susp_secs = sum(e["end"] - e["start"] for e in susp_e)
+        s_dur     = min(1.0, (susp_secs / max(1.0, duration)) * 3.0) if susp_e else 0.0
+        raw_score = 0.50 * s_conceal + 0.35 * s_bypass + 0.15 * s_dur
     raw_score = max(0.0, min(1.0, raw_score))
 
     if raw_score < 0.3:    severity = "NONE"
@@ -816,8 +779,17 @@ def run_pipeline(video_path, progress_callback=None,
         "lstm_detection": {
             "classification": overall_class,
             "confidence"    : overall_conf,
-            "is_shoplifting": overall_class == "shoplifting",
+            "is_shoplifting": overall_class in {"shoplifting", "review"},
         },
+        "yolo_signal": {
+            "frames_with_shoplifting" : len(yolo_shop_confs),
+            "peak_conf"               : round(yolo_peak, 4),
+            "mean_conf"               : round(yolo_mean, 4),
+            "total_segments"          : len(yolo_segments),
+            "shop_segs_above_50pct"   : len(shop_segs),
+        },
+        "yolo_segments"     : yolo_segments,
+        "yolo_shop_moments" : yolo_shop_moments,
         "detections": {
             "persons_tracked"  : max_concurrent_persons,
             "products_detected": products_interacted,
@@ -877,11 +849,12 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
     import cv2, io
     from PIL import Image
 
+    _SUSP_CLASSES = {"shoplifting", "Looking around", "concealment", "bypass"}
+    # Accept any suspicious event regardless of confidence — low YOLO confidence
+    # still identifies the correct moment in the video.
     suspicious = [
         e for e in behavior_events
-        if e.get("behavior_type") in {"shoplifting", "Looking around",
-                                       "concealment", "bypass"}
-        and e.get("confidence", 0) >= 0.5
+        if e.get("behavior_type") in _SUSP_CLASSES
     ]
     if not suspicious:
         return []
@@ -967,8 +940,6 @@ def extract_suspicious_clips(video_path, behavior_events, max_clips=4):
 
     cap.release()
     return clips
-
-
 
 
 # ─── UI Rendering ─────────────────────────────────────────────────────────────
@@ -1082,7 +1053,6 @@ def render_model_performance_tab():
         st.markdown("### Training Learning Curve")
         st.image(str(_lc_path), use_container_width=True)
     elif "confusion_matrix" in (bilstm_info or {}):
-        import plotly.graph_objects as go
         st.markdown("### Confusion Matrix")
         cm = np.array(bilstm_info["confusion_matrix"])
         classes = bilstm_info.get("classes", ["normal", "shoplifting"])
@@ -1164,12 +1134,91 @@ def render_model_performance_tab():
                  "early_stopping_patience": 10})
 
 
+def _yolo_priority_for_display(cls):
+    """Sort order for YOLO class display (most suspicious first)."""
+    return {"shoplifting": 0, "Looking around": 1,
+            "Picking-Holding": 2, "normal": 3}.get(cls, 4)
+
+
+def _render_debug_block(results):
+    """Render the debug info code block (shared by shoplifting and normal paths)."""
+    events = results.get("behavior_events", [])
+    intent = results.get("intent_score", {})
+    lstm   = results.get("lstm_detection", {})
+    det    = results.get("detections", {})
+    vm     = results.get("video_metadata", {})
+
+    shop_windows = [e for e in events if e.get("behavior_type") == "shoplifting"]
+    norm_windows = [e for e in events if e.get("behavior_type") == "normal"]
+    look_windows = [e for e in events if e.get("behavior_type") == "Looking around"]
+
+    yolo_sig = results.get("yolo_signal", {})
+
+    debug = {
+        "── VIDEO ──": "",
+        "filename"         : vm.get("filename", "N/A"),
+        "duration_s"       : round(vm.get("duration", 0), 2),
+        "fps"              : round(vm.get("fps", 0), 2),
+        "resolution"       : f"{vm.get('width')}x{vm.get('height')}",
+        "frame_count"      : vm.get("frame_count", 0),
+        "── LSTM WINDOWS ──": "",
+        "total_windows"    : len(events),
+        "shoplifting_windows": len(shop_windows),
+        "normal_windows"   : len(norm_windows),
+        "looking_around_windows": len(look_windows),
+        "shop_window_ratio": f"{len(shop_windows)/len(events):.1%}" if events else "N/A",
+        "── YOLO SIGNAL ──": "",
+        "yolo_shop_frames"            : yolo_sig.get("frames_with_shoplifting", 0),
+        "yolo_peak_conf"              : f"{yolo_sig.get('peak_conf', 0):.3f}",
+        "yolo_mean_conf"              : f"{yolo_sig.get('mean_conf', 0):.3f}",
+        "yolo_total_segments"         : yolo_sig.get("total_segments", 0),
+        "yolo_shop_segs (>=50%)"      : yolo_sig.get("shop_segs_above_50pct", 0),
+        "yolo_shop_moments"           : len(results.get("yolo_shop_moments", [])),
+        "── CLASSIFICATION ──": "",
+        "rule"                        : "peak >=70% → SHOPLIFTING | 50-69% → REVIEW | <50% → NORMAL",
+        "yolo_peak_conf"              : f"{yolo_sig.get('peak_conf', 0):.3f}",
+        "── LSTM (advisory / XAI only) ──": "",
+        "lstm_shop_windows"           : len(shop_windows),
+        "lstm_norm_windows"           : len(norm_windows),
+        "── FINAL RESULT ──": "",
+        "final_class"      : lstm.get("classification", "N/A"),
+        "is_shoplifting"   : lstm.get("is_shoplifting", False),
+        "confidence"       : f"{lstm.get('confidence', 0):.3f}",
+        "── INTENT SCORE ──": "",
+        "adj_score"        : round(intent.get("score", 0), 4),
+        "severity"         : intent.get("severity", "N/A"),
+        "s_conceal"        : round(intent.get("components", {}).get("concealment", 0), 4),
+        "s_bypass"         : round(intent.get("components", {}).get("bypass", 0), 4),
+        "s_duration"       : round(intent.get("components", {}).get("duration", 0), 4),
+        "── DETECTIONS ──": "",
+        "persons_tracked"  : det.get("persons_tracked", 0),
+        "products_detected": det.get("products_detected", 0),
+        "frames_processed" : det.get("frames_processed", 0),
+    }
+
+    if events:
+        debug["── PER-WINDOW BREAKDOWN ──"] = ""
+        for i, e in enumerate(events):
+            debug[f"  window_{i+1}"] = (
+                f"{e.get('behavior_type','?')}  "
+                f"conf={e.get('confidence',0):.3f}  "
+                f"t={e.get('start_time',0):.1f}s–{e.get('end_time',0):.1f}s"
+            )
+
+    st.code(
+        "\n".join(
+            f"{k:<35} {v}" if v != "" else f"\n{k}"
+            for k, v in debug.items()
+        ),
+        language=None,
+    )
+    st.caption("Screenshot or copy the text above and share it for debugging.")
+
+
 def render_analysis_results(results):
     if not results.get("success", False):
         st.error(f"Analysis failed: {results.get('error', 'Unknown error')}")
         return
-
-    import plotly.graph_objects as go
 
     # ── Early-exit banner (video too short only) ──
     if results.get("early_exit"):
@@ -1196,85 +1245,203 @@ def render_analysis_results(results):
     cls, conf = lstm["classification"], lstm["confidence"]
     is_shop   = lstm["is_shoplifting"]
 
-    # ── LSTM Detection Banner ──
-    if is_shop and conf > 0.7:
-        st.markdown(f"""
-        <div class='alert-critical'>
-            <h2 style='margin:0'>SHOPLIFTING BEHAVIOR DETECTED</h2>
-            <p style='margin:0.5rem 0 0 0'>Classification: <strong>{cls.upper()}</strong>
-            | Confidence: <strong>{conf:.1%}</strong></p>
-        </div>""", unsafe_allow_html=True)
-    elif is_shop:
-        st.markdown(f"""
-        <div class='alert-high'>
-            <h2 style='margin:0'>POTENTIAL SHOPLIFTING</h2>
-            <p style='margin:0.5rem 0 0 0'>Classification: <strong>{cls.upper()}</strong>
-            | Confidence: <strong>{conf:.1%}</strong></p>
-        </div>""", unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class='alert-none'>
-            <h2 style='margin:0'>NORMAL BEHAVIOR</h2>
-            <p style='margin:0.5rem 0 0 0'>Classification: <strong>{cls.upper()}</strong>
-            | Confidence: <strong>{conf:.1%}</strong></p>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ── Risk Score ──
     intent  = results["intent_score"]
     score   = intent["score"]
     sev     = intent["severity"].upper()
-    cls_map = {"CRITICAL": "alert-critical", "HIGH": "alert-high",
-               "MEDIUM": "alert-medium",     "LOW": "alert-low",
-               "NONE": "alert-none"}
-    div_cls = cls_map.get(sev, "alert-none")
 
-    st.markdown("### Bias-Adjusted Risk Assessment")
-    st.markdown(f"""
-    <div class='{div_cls}'>
-        <h3 style='margin:0'>Risk Level: {sev}</h3>
-        <p style='margin:0.5rem 0 0 0'>Score: {score:.2f}</p>
-    </div>""", unsafe_allow_html=True)
-    st.markdown("---")
+    yolo_sig_r    = results.get("yolo_signal", {})
+    peak_conf_val = yolo_sig_r.get("peak_conf", 0.0)
 
-    # ── Detection Stats ──
-    st.markdown("### Detection Statistics")
-    det = results.get("detections", {})
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("PEOPLE INTERACTED WITH THE PRODUCTS",    det.get("persons_tracked", 0))
-    c2.metric("PICKED UP PRODUCTS", det.get("products_detected", 0))
-    c3.metric("Interactions",     det.get("interactions", 0))
-    c4.metric("Frames Processed", det.get("frames_processed", 0))
-    st.markdown("---")
-
-    # ── XAI Explanation ──
-    st.markdown("### Explainable AI (XAI) Analysis")
-    with st.expander("Why did the model make this decision?", expanded=True):
+    # ── Detection Banner (3-way: shoplifting / review / normal) ──────────────
+    if cls == "shoplifting":
+        det    = results.get("detections", {})
+        events = results.get("behavior_events", [])
+        yolo_shop_windows = sum(1 for e in events if e.get("behavior_type") == "shoplifting")
+        yolo_look_windows = sum(1 for e in events if e.get("behavior_type") == "Looking around")
+        persons_count  = det.get("persons_tracked", 0)
+        products_count = det.get("products_detected", 0)
         st.markdown(f"""
-        **Step 1: Object Detection (YOLO26)**
-        - Scanned {det.get('frames_processed', 0)} video frames
-        - Detected {det.get('persons_tracked', 0)} person(s), {det.get('products_detected', 0)} product(s)
-        - YOLO26 (Jan 2026): NMS-free architecture, 43% faster than YOLOv8
+        <div style='background:#cc0000;color:white;padding:1.5rem;
+                    border-radius:12px;margin:1rem 0;'>
+            <h2 style='margin:0 0 0.5rem 0;'>SHOPLIFTING DETECTED</h2>
+            <p style='margin:0 0 0.3rem 0;font-size:1.05rem;'>
+                <strong>Verdict:</strong> SHOPLIFTING
+                &nbsp;|&nbsp; <strong>Peak Confidence:</strong> {peak_conf_val:.1%}
+                &nbsp;|&nbsp; <strong>Threshold:</strong> ≥ 70%
+            </p>
+            <p style='margin:0;font-size:0.9rem;opacity:0.9;'>
+                Shoplifting windows: <strong>{yolo_shop_windows}</strong>
+                &nbsp;·&nbsp; Surveillance windows: <strong>{yolo_look_windows}</strong>
+                &nbsp;·&nbsp; Persons tracked: <strong>{persons_count}</strong>
+                &nbsp;·&nbsp; Product interactions: <strong>{products_count}</strong>
+            </p>
+        </div>""", unsafe_allow_html=True)
+        action_col1, action_col2 = st.columns(2)
+        with action_col1:
+            st.markdown(f"""
+            **Immediate Steps:**
+            - Review annotated video below
+            - Verify person count ({persons_count}) matches floor staff observation
+            - Cross-check with POS transaction (use POS Audit tab)
+            - Do **not** confront — follow store policy
+            """)
+        with action_col2:
+            st.markdown(f"""
+            **Evidence to Collect:**
+            - Save annotated video clip ({results.get('video_metadata', {}).get('filename','')})
+            - Note timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            - Export forensic clips from "Forensic Evidence" section below
+            - Log alert ID: {results.get('alert', {}).get('alert_id', 'N/A') if results.get('alert') else 'No alert generated'}
+            """)
+        st.warning("**Advisory System** — This is a pattern match, NOT definitive proof. Human review is mandatory before any action is taken.")
 
-        **Step 2: Feature Extraction (MobileNetV2)**
-        - Extracted 1280-dim spatial features per frame
-        - Raw backbone features (AdaptiveAvgPool, no projection head)
-        - Last 3 inverted residual blocks fine-tuned on retail video
+    elif cls == "review":
+        det           = results.get("detections", {})
+        persons_count = det.get("persons_tracked", 0)
+        st.markdown(f"""
+        <div style='background:#e65c00;color:white;padding:1.5rem;
+                    border-radius:12px;margin:1rem 0;'>
+            <h2 style='margin:0 0 0.5rem 0;'>NEEDS REVIEW</h2>
+            <p style='margin:0 0 0.3rem 0;font-size:1.05rem;'>
+                <strong>Peak Confidence:</strong> {peak_conf_val:.1%}
+                &nbsp;|&nbsp; <strong>Range:</strong> 50–69% (ambiguous — human review required)
+            </p>
+            <p style='margin:0;font-size:0.9rem;opacity:0.9;'>
+                Persons tracked: <strong>{persons_count}</strong>
+                &nbsp;·&nbsp; Not conclusive — review footage before taking any action
+            </p>
+        </div>""", unsafe_allow_html=True)
+        st.warning("**Ambiguous signal** — Peak confidence is 50–69%. This may be normal behaviour in a suspicious pose. A human must review before any conclusion is drawn.")
 
-        **Step 3: Temporal Classification (Bidirectional LSTM)**
-        - Analysed {LSTM_SEQ_LEN}-frame sliding windows (stride={LSTM_STRIDE})
-        - **Classification: {cls.upper()}** | **Confidence: {conf:.1%}**
+    else:
+        # Normal behaviour banner
+        st.markdown(f"""
+        <div class='alert-none'>
+            <h2 style='margin:0'>NORMAL BEHAVIOR</h2>
+            <p style='margin:0.5rem 0 0 0'>Peak shoplifting confidence: <strong>{peak_conf_val:.1%}</strong>
+            (below 50% threshold)</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # For normal videos show only a compact summary — no verbose risk/XAI/timeline
+    if not is_shop:
+        det = results.get("detections", {})
+        vm  = results.get("video_metadata", {})
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Persons Tracked",   det.get("persons_tracked", 0))
+        c2.metric("Products Detected", det.get("products_detected", 0))
+        c3.metric("Frames Processed",  det.get("frames_processed", 0))
+        c4.metric("Duration",          f"{vm.get('duration', 0):.1f}s")
+        st.markdown("---")
+        st.markdown("### Video Information")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.write(f"**File:** {vm.get('filename', 'N/A')}")
+        c2.write(f"**Duration:** {vm.get('duration', 0):.1f}s")
+        c3.write(f"**Resolution:** {vm.get('width', 0)}x{vm.get('height', 0)}")
+        c4.write(f"**FPS:** {vm.get('fps', 0):.1f}")
+        st.markdown("---")
+        st.markdown("""
+        <div class='alert-none'>
+            <h4 style='margin:0'>No Concerns Detected</h4>
+            <p style='margin:0.5rem 0'>Normal shopping behaviour. No immediate concerns.</p>
+        </div>""", unsafe_allow_html=True)
+        with st.expander("Debug Info — copy this and share for troubleshooting"):
+            _render_debug_block(results)
+        return   # stop here for normal — skip all the shoplifting-specific sections
+
+    # ── Everything below is shoplifting-only ─────────────────────────────────
+
+    det      = results.get("detections", {})
+    events   = results.get("behavior_events", [])
+    moments  = results.get("yolo_shop_moments", [])
+    yolo_sig = results.get("yolo_signal", {})
+
+    # ── XAI: Detection Evidence (primary section) ─────────────────────────────
+    st.markdown("### Detection Evidence")
+    n_high   = yolo_sig.get("shop_segs_above_50pct", 0)
+    peak_c   = yolo_sig.get("peak_conf", 0.0)
+    mean_c   = yolo_sig.get("mean_conf", 0.0)
+    n_segs   = yolo_sig.get("total_segments", 0)
+
+    ev_c1, ev_c2, ev_c3, ev_c4 = st.columns(4)
+    ev_c1.metric("Shoplifting Segments (≥50%)", f"{n_high} / {n_segs}",
+                 help="30-frame segments where peak shoplifting confidence ≥ 50%")
+    ev_c2.metric("Peak Confidence",  f"{peak_c:.1%}")
+    ev_c3.metric("Mean Confidence",  f"{mean_c:.1%}")
+    ev_c4.metric("Persons Tracked",  det.get("persons_tracked", 0))
+
+    if moments:
+        # Confidence-over-time scatter for detected moments
+        times = [m["time"] for m in moments]
+        confs = [m["conf"] for m in moments]
+        fig_ev = go.Figure()
+        fig_ev.add_trace(go.Scatter(
+            x=times, y=confs, mode="markers+lines",
+            marker=dict(color=["#cc0000" if c >= 0.70 else "#ff9800" for c in confs],
+                        size=8),
+            line=dict(color="#cc0000", width=1),
+            name="Shoplifting confidence",
+            hovertemplate="t=%{x:.1f}s  conf=%{y:.0%}<extra></extra>",
+        ))
+        fig_ev.add_hline(y=0.70, line_dash="dash", line_color="#cc0000",
+                         annotation_text="70% → SHOPLIFTING")
+        fig_ev.add_hline(y=0.50, line_dash="dot", line_color="#e65c00",
+                         annotation_text="50% → NEEDS REVIEW")
+        fig_ev.update_layout(
+            height=200, margin=dict(l=20, r=20, t=10, b=30),
+            xaxis_title="Time (s)", yaxis=dict(tickformat=".0%", range=[0.45, 1.0]),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_ev, use_container_width=True)
+        st.caption(
+            f"Red markers ≥ 70% (SHOPLIFTING) | Orange markers 50–69% (NEEDS REVIEW) | "
+            f"First detection at {moments[0]['time']:.1f}s, "
+            f"last at {moments[-1]['time']:.1f}s"
+        )
+    st.markdown("---")
+
+    # ── XAI: Why did the model decide this? ──────────────────────────────────
+    st.markdown("### Explainable AI (XAI) — Decision Reasoning")
+    _n_seconds = len(set(round(m["time"], 0) for m in moments))
+    _spread    = "multiple distinct moments" if _n_seconds > 1 else "a single moment"
+    with st.expander("Full explanation", expanded=True):
+        _verdict_label = {"shoplifting": "SHOPLIFTING", "review": "NEEDS REVIEW"}.get(cls, "NORMAL")
+        st.markdown(f"""
+**Decision rule (single peak threshold):**
+- Peak shoplifting confidence **≥ 70%** → 🔴 SHOPLIFTING
+- Peak shoplifting confidence **50–69%** → 🟠 NEEDS REVIEW
+- Peak shoplifting confidence **< 50%** → 🟢 NORMAL
+
+No segment counting, no vote accumulation — only the single highest confidence frame decides.
+
+**Evidence summary:**
+- Peak confidence across all frames: **{peak_c:.1%}** → verdict: **{_verdict_label}**
+- Frames with shoplifting confidence ≥ 50%: **{len(moments)}** {('spread across ' + _spread) if moments else '(none)'}
+- Total 30-frame segments analysed: **{n_segs}** ({n_high} had peak ≥ 50%)
+
+**Pipeline steps:**
+
+*Step 1 — YOLO26 Behaviour Detection (primary verdict signal)*
+Scanned {det.get('frames_processed', 0)} frames. The highest shoplifting confidence
+across all frames is compared directly against the 70% / 50% thresholds.
+
+*Step 2 — MobileNetV2 Feature Extraction*
+Extracted 1280-dim spatial features every 4th frame for the LSTM.
+
+*Step 3 — BiLSTM Temporal Analysis (advisory / XAI context only)*
+Analysed {LSTM_SEQ_LEN}-frame windows. Result: **{cls.upper()}** ({conf:.1%}).
+BiLSTM is shown for transparency — it does not affect the final verdict.
         """)
 
-        if is_shop:
-            st.warning("**Important:** Pattern match only — not definitive proof. Human review essential.")
-        else:
-            st.success("Movement patterns consistent with normal shopping behaviour.")
-
-        events = results.get("behavior_events", [])
+        # LSTM window breakdown (advisory context)
+        total_windows = len(events)
+        if total_windows > 0:
+            shop_count = sum(1 for e in events if e.get("behavior_type") == "shoplifting")
+            st.markdown(f"**BiLSTM windows:** {shop_count}/{total_windows} classified as shoplifting "
+                        f"({shop_count/total_windows:.0%}) — advisory only.")
         if events:
-            st.markdown("#### Behavior Event Breakdown")
+            st.markdown("**BiLSTM per-window breakdown:**")
             counts = {}
             for e in events:
                 bt = e.get("behavior_type", "unknown")
@@ -1283,8 +1450,33 @@ def render_analysis_results(results):
                 counts[bt]["conf_sum"] += e.get("confidence", 0)
             for bt, d in counts.items():
                 avg_c = d["conf_sum"] / d["count"]
-                icon  = "[HIGH]" if bt in {"shoplifting", "concealment"} else "[MED]" if bt == "bypass" else "[OK]"
-                st.markdown(f"{icon} **{bt.capitalize()}**: {d['count']} segment(s), avg confidence: {avg_c:.1%}")
+                st.markdown(f"- **{bt.capitalize()}**: {d['count']} window(s), avg {avg_c:.1%}")
+
+        st.warning("Advisory system — pattern match only, NOT definitive proof. Human review is mandatory before any action.")
+
+    st.markdown("---")
+
+    # ── Risk Assessment ───────────────────────────────────────────────────────
+    cls_map = {"CRITICAL": "alert-critical", "HIGH": "alert-high",
+               "MEDIUM": "alert-medium",     "LOW": "alert-low",
+               "NONE": "alert-none"}
+    div_cls = cls_map.get(sev, "alert-none")
+    st.markdown("### Risk Assessment")
+    st.markdown(f"""
+    <div class='{div_cls}'>
+        <h3 style='margin:0'>Risk Level: {sev}</h3>
+        <p style='margin:0.5rem 0 0 0'>Score: {score:.2f} — based on peak confidence ({peak_c:.1%}) and {n_high} sustained high-confidence frame(s).</p>
+    </div>""", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # ── Detection Stats ───────────────────────────────────────────────────────
+    st.markdown("### Detection Statistics")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("People Tracked",    det.get("persons_tracked", 0))
+    c2.metric("Products Detected", det.get("products_detected", 0))
+    c3.metric("Interactions",      det.get("interactions", 0))
+    c4.metric("Frames Processed",  det.get("frames_processed", 0))
+    st.markdown("---")
 
     st.markdown("---")
 
@@ -1322,35 +1514,115 @@ def render_analysis_results(results):
 
     # ── Behavior Timeline ──
     st.markdown("### Behavior Timeline")
-    events = results.get("behavior_events", [])
-    if events:
-        colors = {"normal": "#00c853", "shoplifting": "#e91e63",
-                  "concealment": "#ff5722", "bypass": "#f44336"}
+
+    CLASS_COLORS = {
+        "shoplifting"    : "#e91e63",   # red
+        "Looking around" : "#ff9800",   # orange
+        "Picking-Holding": "#ffc107",   # amber
+        "normal"         : "#00c853",   # green
+        "concealment"    : "#ff5722",
+        "bypass"         : "#f44336",
+    }
+
+    yolo_segs = results.get("yolo_segments", [])
+    lstm_evts = results.get("behavior_events", [])
+    has_yolo  = bool(yolo_segs)
+    has_lstm  = bool(lstm_evts)
+
+    if has_yolo or has_lstm:
         fig = go.Figure()
-        for i, ev in enumerate(events):
-            bt  = ev.get("behavior_type", "unknown")
-            col = colors.get(bt, "#667eea")
-            fig.add_trace(go.Scatter(
-                x=[ev["start_time"], ev["end_time"]], y=[0, 0],
-                mode="lines", line=dict(color=col, width=25),
-                name=bt, showlegend=(i == 0 or events[i-1]["behavior_type"] != bt),
-                hovertemplate=(f"Behavior: {bt}<br>Time: {ev['start_time']:.1f}s – "
-                               f"{ev['end_time']:.1f}s<br>Conf: {ev['confidence']:.1%}<extra></extra>"),
+        seen_labels = set()
+
+        # ── Row 1 (y=1): YOLO per-30-frame segments ──────────────────────────
+        for seg in yolo_segs:
+            cls = seg["class"]
+            col = CLASS_COLORS.get(cls, "#667eea")
+            show_leg = cls not in seen_labels
+            if show_leg:
+                seen_labels.add(cls)
+            fig.add_trace(go.Bar(
+                x=[seg["end_time"] - seg["start_time"]],
+                y=["YOLO Frames"],
+                base=[seg["start_time"]],
+                orientation="h",
+                marker_color=col,
+                name=cls,
+                showlegend=show_leg,
+                legendgroup=cls,
+                hovertemplate=(
+                    f"<b>YOLO: {cls}</b><br>"
+                    f"Time: {seg['start_time']:.1f}s – {seg['end_time']:.1f}s<br>"
+                    f"Avg conf: {seg['confidence']:.1%}<extra></extra>"
+                ),
             ))
+
+        # ── Row 2 (y=0): LSTM window predictions ─────────────────────────────
+        for ev in lstm_evts:
+            cls = ev.get("behavior_type", "unknown")
+            col = CLASS_COLORS.get(cls, "#667eea")
+            show_leg = cls not in seen_labels
+            if show_leg:
+                seen_labels.add(cls)
+            fig.add_trace(go.Bar(
+                x=[ev["end_time"] - ev["start_time"]],
+                y=["LSTM Windows"],
+                base=[ev["start_time"]],
+                orientation="h",
+                marker_color=col,
+                name=cls,
+                showlegend=show_leg,
+                legendgroup=cls,
+                hovertemplate=(
+                    f"<b>LSTM: {cls}</b><br>"
+                    f"Time: {ev['start_time']:.1f}s – {ev['end_time']:.1f}s<br>"
+                    f"Conf: {ev['confidence']:.1%}<extra></extra>"
+                ),
+            ))
+
         fig.update_layout(
-            title="Behaviour Over Time", xaxis_title="Time (seconds)",
-            height=150, yaxis=dict(visible=False),
-            margin=dict(l=20, r=20, t=50, b=20)
+            barmode="overlay",
+            title="Behaviour Over Time — YOLO (per 30 frames) + LSTM (windows)",
+            xaxis_title="Time (seconds)",
+            yaxis=dict(categoryorder="array",
+                       categoryarray=["LSTM Windows", "YOLO Frames"]),
+            height=220,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                        xanchor="left", x=0),
         )
         st.plotly_chart(fig, use_container_width=True)
 
+        # ── YOLO class summary counts ─────────────────────────────────────────
+        if has_yolo:
+            yolo_counts = Counter(s["class"] for s in yolo_segs)
+            total_segs  = len(yolo_segs)
+            st.markdown("**YOLO class distribution across 30-frame segments:**")
+            cols = st.columns(len(yolo_counts))
+            for ci, (cls, cnt) in enumerate(sorted(
+                    yolo_counts.items(),
+                    key=lambda x: _yolo_priority_for_display(x[0]))):
+                pct = cnt / total_segs
+                cols[ci].metric(cls, f"{cnt} seg", f"{pct:.0%}")
+
         with st.expander("View Detailed Behaviour Events"):
-            rows = [{"Behaviour": e["behavior_type"].capitalize(),
-                     "Start": f"{e['start_time']:.1f}s",
-                     "End": f"{e['end_time']:.1f}s",
-                     "Confidence": f"{e['confidence']:.1%}"}
-                    for e in events]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            if has_lstm:
+                st.markdown("**LSTM Windows**")
+                rows = [{"Behaviour"  : e["behavior_type"].capitalize(),
+                         "Start"      : f"{e['start_time']:.1f}s",
+                         "End"        : f"{e['end_time']:.1f}s",
+                         "Confidence" : f"{e['confidence']:.1%}"}
+                        for e in lstm_evts]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                             hide_index=True)
+            if has_yolo:
+                st.markdown("**YOLO Segments (30-frame blocks)**")
+                yrows = [{"Class"      : s["class"],
+                          "Start"      : f"{s['start_time']:.1f}s",
+                          "End"        : f"{s['end_time']:.1f}s",
+                          "Avg Conf"   : f"{s['confidence']:.1%}"}
+                         for s in yolo_segs]
+                st.dataframe(pd.DataFrame(yrows), use_container_width=True,
+                             hide_index=True)
     else:
         st.info("No behaviour events detected.")
 
@@ -1379,7 +1651,7 @@ def render_analysis_results(results):
                         f"|  {fd['confidence']:.0%} confidence"
                     )
         else:
-            st.info("No high-confidence shoplifting clips found (threshold: 50%).")
+            st.info("No suspicious clips could be extracted from this video.")
         st.markdown("---")
 
     # ── Quality & Fairness ──
@@ -1453,22 +1725,10 @@ def render_analysis_results(results):
             <p style='margin:0.5rem 0'>Normal shopping behaviour. No immediate concerns.</p>
         </div>""", unsafe_allow_html=True)
 
-
-# ─── YOLO class → readable product label mapping ──────────────────────────────
-YOLO_TO_PRODUCT = {
-    "bottle"    : "Bottle / Drink",
-    "cup"       : "Cup / Drink",
-    "bowl"      : "Bowl / Food",
-    "banana"    : "Banana",
-    "apple"     : "Apple",
-    "sandwich"  : "Sandwich / Food",
-    "backpack"  : "Backpack",
-    "handbag"   : "Handbag",
-    "book"      : "Book / Magazine",
-    "cell phone": "Mobile Phone",
-    "orange"    : "Orange / Fruit",
-    "donut"     : "Donut / Snack",
-}
+    # ── Debug Info ──────────────────────────────────────────────────────────────
+    st.markdown("---")
+    with st.expander("Debug Info — copy this and share for troubleshooting"):
+        _render_debug_block(results)
 
 
 def render_pos_audit(analysis_results):
@@ -1606,8 +1866,6 @@ def render_pos_audit(analysis_results):
     if not st.session_state.pos_items:
         st.info("Add items to the POS transaction to compare.")
         return
-
-    import plotly.graph_objects as go
 
     det    = analysis_results.get("detections", {})
     events = analysis_results.get("behavior_events", [])
@@ -1821,15 +2079,34 @@ def main():
             except Exception as e:
                 results = {"success": False, "error": str(e)}
 
-            # Extract forensic GIF clips separately so a clip-extraction failure
-            # never wipes out the main analysis results.
-            if results.get("success"):
+            # Extract forensic GIF clips only when the final verdict is shoplifting.
+            if (results.get("success") and
+                    results.get("lstm_detection", {}).get("is_shoplifting", False)):
                 try:
+                    _SUSP = {"shoplifting", "Looking around", "concealment", "bypass"}
+                    # Prefer LSTM shoplifting events; fall back to YOLO segments
+                    # when LSTM has no suspicious windows (most common case when
+                    # LSTM model always outputs normal).
+                    clip_events = [
+                        e for e in results.get("behavior_events", [])
+                        if e.get("behavior_type") in _SUSP
+                    ]
+                    if not clip_events:
+                        clip_events = [
+                            {"start_time"   : s["start_time"],
+                             "end_time"     : s["end_time"],
+                             "behavior_type": s["class"],
+                             "confidence"   : s["confidence"]}
+                            for s in results.get("yolo_segments", [])
+                            if s["class"] in _SUSP
+                        ]
                     results["suspicious_frames"] = extract_suspicious_clips(
-                        video_path, results.get("behavior_events", []), max_clips=4
+                        video_path, clip_events, max_clips=4
                     )
                 except Exception:
                     results["suspicious_frames"] = []
+            else:
+                results["suspicious_frames"] = []
 
             # Clear live preview widgets
             _frame_ph.empty()
