@@ -31,7 +31,6 @@ DATA_DIR   = ROOT_DIR / "data"
 YOLO26_PATH     = MODELS_DIR / "yolo26_retail.pt"
 YOLO26_BASE     = MODELS_DIR / "yolo26n.pt"          # COCO base — reliable person detection
 YOLO26_DW_V2    = MODELS_DIR / "yolo26_dw_v2.pt"     # domain-adaptive fine-tune (Option 1)
-MOBILENET_PATH  = MODELS_DIR / "mobilenet_extractor.pt"
 LSTM_PATH       = MODELS_DIR / "bilstm_dw.pt"
 LSTM_INFO_PATH  = MODELS_DIR / "bilstm_dw_info.json"
 

@@ -3,7 +3,7 @@
 **Student:** Santosh Manoharadas | W1954095 / 20220967  
 **Project:** Digital Witness — Bias-Aware, Explainable Retail Security Assistant  
 **Institution:** IIT (Final Year Project, 2025–2026)  
-**Deadline:** 30 March 2026  
+**Deadline:** 17 April 2026  
 **Current Status:** Version 3.0 (dev3.0 branch) — production-grade single-rule classification implemented
 
 ---
@@ -17,11 +17,13 @@ This document is the single source of truth for the Digital Witness project. Whe
 ## 1. PROBLEM STATEMENT
 
 Current AI-powered retail security systems operate as **opaque black boxes**. They cannot reliably distinguish between:
+
 - Intentional shoplifting
 - Accidental behaviour (e.g. a customer forgetting to scan an item)
 - Vulnerable behaviour (e.g. elderly confusion, children misunderstanding)
 
 This causes:
+
 - False accusations and legal liability
 - Erosion of customer trust
 - Ethical concerns around automated surveillance
@@ -38,6 +40,7 @@ Digital Witness is designed as a **Blameless AI Assistant** — an advisory tool
 **Core design principle:** The system NEVER determines guilt. It generates an intent risk score with an explainable evidence trail. All alerts require human validation before any action.
 
 **Three non-negotiable constraints built into the system:**
+
 1. No facial recognition or identity inference — analysis is body-pose only
 2. No personal data stored — all processing is stateless per video
 3. Every output includes a mandatory human-review disclaimer
@@ -96,7 +99,7 @@ Video Input
 
 **YOLO as primary signal:** YOLO sees every frame and makes real-time per-frame decisions. Its shoplifting confidence is the most direct signal available. The BiLSTM adds temporal context but was found to have a training distribution bias toward "normal" (training data imbalance), making it unreliable as a primary signal.
 
-**BiLSTM as advisory / XAI:** The attention weights from the BiLSTM show *which frames* in a 7.5-second window most influenced the classification. This is the XAI output — a temporal explanation of which moments were suspicious. It is shown to the operator for transparency but does not affect the verdict.
+**BiLSTM as advisory / XAI:** The attention weights from the BiLSTM show _which frames_ in a 7.5-second window most influenced the classification. This is the XAI output — a temporal explanation of which moments were suspicious. It is shown to the operator for transparency but does not affect the verdict.
 
 **Single peak threshold (final rule):** Multiple iterations of more complex rules (segment voting, majority voting, sustained-frame rules) were trialled and found to produce inconsistency between what the live preview showed and what the final verdict said. The single-peak rule is the simplest possible rule that is also the most transparent to explain to a security officer: "if the model was ever more than 70% confident it saw shoplifting, the verdict is shoplifting."
 
@@ -112,11 +115,13 @@ Video Input
 **Training strategy:** Backbone frozen (freeze=10) — only the detection head learns retail-specific classes
 
 **Model priority at inference (automatic fallback):**
+
 1. `yolo26_dw_v2.pt` — domain-adaptive fine-tune (preferred)
 2. `yolo26n.pt` — COCO base (reliable person detection)
 3. `yolo26_retail.pt` — retail-only fine-tune (legacy fallback)
 
 **Inference hyperparameters:**
+
 - `YOLO_CONF = 0.2` (confidence threshold — deliberately low to capture ambiguous poses)
 - `YOLO_IOU = 0.45` (IoU threshold for NMS)
 - `imgsz = 320` (inference resolution — 4× faster than default 640 with minor accuracy tradeoff)
@@ -139,6 +144,7 @@ When multiple bounding boxes exist in a single frame, the highest-priority class
 If the fine-tuned model is unavailable, the system falls back to COCO behaviour: class 0 = person (detected for tracking), COCO product classes (bottle, cup, backpack, etc.) detected for interaction tracking. No 4-class behaviour signal in this mode — only person count and product proximity.
 
 **Bounding box colour coding (live preview):**
+
 - Red (#dc0000) — shoplifting ≥ 50%
 - Green (0,200,0) — shoplifting < 50% (shown as "normal" in label)
 - Orange/cyan (0,140,255) — Looking around
@@ -149,6 +155,7 @@ If the fine-tuned model is unavailable, the system falls back to COCO behaviour:
 **Base architecture:** torchvision MobileNetV2 (pretrained on ImageNet — MobileNet_V2_Weights.DEFAULT)
 
 **Modified architecture:**
+
 ```python
 class MobileNetV2Extractor(nn.Module):
     def __init__(self):
@@ -160,7 +167,7 @@ class MobileNetV2Extractor(nn.Module):
             nn.Dropout(p=0.3),
             nn.Linear(512, 2),
         )
-    
+
     def extract_features(self, x):
         x = self.features(x)
         x = self.pool(x)
@@ -170,6 +177,7 @@ class MobileNetV2Extractor(nn.Module):
 **During inference:** Only `extract_features()` is called. The classifier head is loaded from checkpoint but never used during pipeline inference.
 
 **Training setup (Cell 4 in notebook):**
+
 - Input: 224×224 RGB person crops, sampled at FPS_TARGET = 6fps
 - Data split: 80% train / 10% validation / 10% test (stratified by class, fixed seed=42)
 - `WeightedRandomSampler` used to handle class imbalance
@@ -181,6 +189,7 @@ class MobileNetV2Extractor(nn.Module):
 ### 4.3 BiLSTM + Temporal Attention (Stage 3)
 
 **Architecture:**
+
 ```python
 class BiLSTMAttentionClassifier(nn.Module):
     def __init__(self):
@@ -198,6 +207,7 @@ class BiLSTMAttentionClassifier(nn.Module):
 ```
 
 **Temporal Attention mechanism:**
+
 ```python
 class TemporalAttention(nn.Module):
     def __init__(self, h):
@@ -206,7 +216,7 @@ class TemporalAttention(nn.Module):
             nn.Tanh(),
             nn.Linear(h // 2, 1),   # 256 → 1 (scalar attention score per timestep)
         )
-    
+
     def forward(self, lstm_out):   # lstm_out: (B, T=45, 512)
         scores  = self.attn(lstm_out).squeeze(-1)   # (B, T)
         weights = torch.softmax(scores, dim=1)       # normalised attention distribution
@@ -217,6 +227,7 @@ class TemporalAttention(nn.Module):
 **The attention weights are the XAI contribution:** Each weight value represents what fraction of the model's decision was attributed to that specific 4-frame window. Frames with weights above the uniform baseline (1/45 ≈ 2.2%) indicate moments of heightened suspicious activity. This is visualised as a bar chart in the notebook (Cell 7).
 
 **Sequence parameters:**
+
 - `LSTM_SEQ_LEN = 45` — 45 consecutive feature vectors per window (= 45×4 = 180 video frames ≈ 6 seconds at 30fps)
 - `LSTM_STRIDE = 15` — step between windows (50% overlap when divided into 45-frame windows)
 
@@ -227,6 +238,7 @@ class TemporalAttention(nn.Module):
 If `len(all_feats) < LSTM_SEQ_LEN`, the feature array is zero-padded on the right to reach length 45. The padding frames are silent (all zeros) which the LSTM interprets as absent context, automatically reducing confidence via the scale factor.
 
 **Training setup (Cell 5):**
+
 - Data split: same 80/10/10 strategy as MobileNetV2, test set held out until Cell 7
 - `WeightedRandomSampler` for class balance
 - Input sequences: 45-frame windows of 1280-dim feature vectors
@@ -279,12 +291,14 @@ s_dur      = _sustained
 | ≥ 0.85 | CRITICAL |
 
 **Original intent scoring formula (from notebook Cell 10, used in earlier versions):**
+
 ```
 score = 0.40 × behaviour_score     (BiLSTM output)
       + 0.30 × concealment_score   (YOLO concealment classes)
       + 0.20 × pos_mismatch_score  (POS discrepancy)
       + 0.10 × duration_score      (temporal persistence)
 ```
+
 This formula is documented in the notebook as the research-phase design. The live application now uses the simplified YOLO-peak-based formula above, with POS integration handled separately in the POS Audit tab.
 
 ---
@@ -294,6 +308,7 @@ This formula is documented in the notebook as the research-phase design. The liv
 The video is post-processed into 30-frame segments to provide a structured evidence timeline for the XAI output.
 
 **Segment computation:**
+
 ```python
 YOLO_SEG_FRAMES = 30   # one segment per 30 frames
 
@@ -305,12 +320,14 @@ for each segment:
 ```
 
 **Segment is used for:**
+
 - XAI scatter chart (confidence over time) — marks each ≥50% shoplifting frame
 - "Shoplifting Segments (≥50%)" metric card — shows how many of N segments had shoplifting signal
 - Intent score `_n_segs` calculation (sustained signal indicator)
 - YOLO class distribution bar chart in the timeline section
 
 **Scatter chart reference lines:**
+
 - 70% (red dashed) → SHOPLIFTING threshold
 - 50% (orange dotted) → NEEDS REVIEW threshold
 
@@ -323,6 +340,7 @@ for each segment:
 The POS (Point of Sale) audit is a **mock terminal** that simulates real-world POS-behaviour data fusion. The operator enters items as they would appear in a POS transaction, and the system compares this against what the camera detected.
 
 **The mismatch analysis works at the behavioural level, not product-instance level.** The behaviour model classifies person actions (Picking-Holding, shoplifting, Looking around) rather than identifying specific product SKUs. The system therefore compares:
+
 - **Camera signals:** "Picking-Holding events", "LSTM shoplifting windows", "persons tracked"
 - **POS records:** itemised transaction entered by operator
 
@@ -330,24 +348,25 @@ The POS (Point of Sale) audit is a **mock terminal** that simulates real-world P
 
 The mock catalog contains 10 product entries (SKU, name, unit price):
 
-| SKU | Product | Price |
-|-----|---------|-------|
-| ITEM001 | Snack Bar | £2.99 |
-| ITEM002 | Soda Bottle | £1.99 |
+| SKU     | Product       | Price |
+| ------- | ------------- | ----- |
+| ITEM001 | Snack Bar     | £2.99 |
+| ITEM002 | Soda Bottle   | £1.99 |
 | ITEM003 | Chocolate Box | £5.99 |
-| ITEM004 | Energy Drink | £3.49 |
-| ITEM005 | Chips Bag | £2.49 |
-| ITEM006 | Candy Pack | £1.49 |
-| ITEM007 | Gum Pack | £0.99 |
-| ITEM008 | Protein Bar | £3.99 |
-| ITEM009 | Water Bottle | £1.29 |
-| ITEM010 | Coffee Can | £2.79 |
+| ITEM004 | Energy Drink  | £3.49 |
+| ITEM005 | Chips Bag     | £2.49 |
+| ITEM006 | Candy Pack    | £1.49 |
+| ITEM007 | Gum Pack      | £0.99 |
+| ITEM008 | Protein Bar   | £3.99 |
+| ITEM009 | Water Bottle  | £1.29 |
+| ITEM010 | Coffee Can    | £2.79 |
 
 ### 7.3 PersonProductTracker (from notebook Cell 8)
 
 The `PersonProductTracker` class tracks behaviour-related state for a single person across frames:
 
 **Fields tracked:**
+
 - `direct_shoplifting_frames` — frames where class "shoplifting" detected
 - `looking_around_frames` — frames where class "Looking around" detected
 - `picking_holding_frames` — frames where class "Picking-Holding" detected
@@ -358,6 +377,7 @@ The `PersonProductTracker` class tracks behaviour-related state for a single per
 ### 7.4 Mismatch Detection
 
 Three mismatch categories are flagged:
+
 1. **UNSCANNED** — item detected by camera but not in POS transaction
 2. **UNTOUCHED** — item in POS transaction but no camera interaction detected
 3. **MATCH** — item in both POS and camera evidence
@@ -373,6 +393,7 @@ POS items are stored in Streamlit session state (`st.session_state.pos_items`) a
 The live preview streams annotated frames to the browser during video processing, before the final verdict is known.
 
 **Performance settings:**
+
 - `_live_step = 15` — update preview every 15 frames (≈2fps at 30fps source)
 - Preview downscaled to max 480px wide before sending to browser (reduces WebSocket payload ~4× for typical 1080p footage)
 - `cv2.INTER_AREA` interpolation for downscaling (best for pixel averaging)
@@ -392,21 +413,27 @@ The live preview streams annotated frames to the browser during video processing
 The following iterations were tried before arriving at the current single-peak rule. This history is important for the thesis methodology section.
 
 ### Iteration 1 — Simple 55% threshold
+
 A single frame with shoplifting confidence ≥ 55% → shoplifting verdict. **Problem:** One ambiguous frame could trigger a shoplifting verdict.
 
 ### Iteration 2 — Majority vote with 45% gate
+
 BiLSTM majority vote. If >50% of LSTM windows voted shoplifting AND confidence ≥ 45% → shoplifting. **Problem:** BiLSTM always voted normal (training distribution imbalance).
 
 ### Iteration 3 — Sustained frames gate
+
 Require ≥ 3 consecutive frames with shoplifting ≥ 55%. **Problem:** Normal videos with brief ambiguous poses still triggered.
 
 ### Iteration 4 — YOLO-only with segment voting
+
 Remove BiLSTM from verdict. 30-frame segments, if any segment has peak ≥ 50% → shoplifting. **Problem:** Segments with brief 30% detections were being counted; inconsistency between live preview and final verdict.
 
 ### Iteration 5 — Segment threshold 50%
+
 Segments with peak ≥ 50% only. **Problem:** Still inconsistency. Live preview showed red boxes but final output was normal (because bounding box colouring used 50% gate but verdict used segment counting with different logic).
 
 ### Iteration 6 — Current: Single peak threshold
+
 `yolo_peak = max(all shoplifting frames)`. Three-way verdict: ≥70% SHOPLIFTING, 50–69% NEEDS REVIEW, <50% NORMAL. **Result:** Consistent, transparent, directly explainable.
 
 ---
@@ -416,6 +443,7 @@ Segments with peak ≥ 50% only. **Problem:** Still inconsistency. Live preview 
 The system generates five distinct XAI components:
 
 ### 10.1 Detection Evidence Scatter Chart
+
 - X-axis: time in seconds
 - Y-axis: shoplifting confidence
 - Marker colour: red ≥70%, orange 50–69%
@@ -423,27 +451,35 @@ The system generates five distinct XAI components:
 - Shows the temporal distribution of suspicious frames
 
 ### 10.2 Decision Reasoning Expander
+
 Expandable section in plain English explaining:
+
 - The decision rule (peak threshold)
 - Peak confidence observed and resulting verdict
 - Number of frames ≥50% and their temporal spread
 - All three pipeline steps with counts
 
 ### 10.3 BiLSTM Advisory Context
+
 Advisory (non-verdict) display showing:
+
 - Total LSTM windows analysed
 - Fraction classified as shoplifting by LSTM
 - Per-behaviour-type window count and average confidence
 - Explicit labelling: "advisory only — does not affect verdict"
 
 ### 10.4 Behaviour Timeline Chart
+
 Gantt-style chart with two tracks:
+
 - LSTM Windows track (per-window classification over time)
 - YOLO Frames track (per-segment classification over time)
-Both shown with colour coding by class for visual temporal comparison.
+  Both shown with colour coding by class for visual temporal comparison.
 
 ### 10.5 Forensic Case File (from notebook)
+
 Structured JSON audit trail containing:
+
 - UUID case_id
 - ISO timestamp
 - Video metadata (path, duration, fps, resolution, frame count)
@@ -462,6 +498,7 @@ Structured JSON audit trail containing:
 **Fairness score:** Default 0.85 (high fairness — no demographic indicators available in video-only mode). Reduces to 0.50 if LSTM model is not trained (random weights).
 
 **Bias flags generated when:**
+
 - LSTM model not trained (`LSTM_PATH` does not exist)
 - Score is uncertain (near threshold)
 
@@ -478,15 +515,18 @@ Structured JSON audit trail containing:
 The application is a single-page Streamlit app with a tab-based layout.
 
 ### Tab 1 — Model Performance
+
 - BiLSTM/MobileNet training metrics display
 - Confusion matrix visualisation (Plotly heatmap if JSON data available, else image file)
 - Training learning curve (loss/accuracy over epochs)
 - Loaded from: `models/bilstm_dw_info.json`, `models/mobilenet_dw_info.json`
 
 ### Tab 2 — Video Analysis
+
 **Sub-sections:**
 
 **Upload panel:**
+
 - Supported formats: MP4, AVI, MOV, MKV
 - Progress bar with per-stage status messages (10 stages, 0%→100%)
 - Live preview streamed during processing
@@ -495,20 +535,24 @@ The application is a single-page Streamlit app with a tab-based layout.
 **Analysis Results (shown after processing):**
 
 For SHOPLIFTING:
+
 - Red banner: "SHOPLIFTING DETECTED" with peak confidence
 - Security Action Panel: recommended immediate steps + evidence checklist
 - Advisory warning: mandatory before action
 
 For NEEDS REVIEW:
+
 - Orange banner: "NEEDS REVIEW" with peak confidence (50–69% range)
 - Ambiguous signal warning
 
 For NORMAL:
+
 - Green banner: "NORMAL BEHAVIOR"
 - Compact summary (4 metric cards: persons, products, frames, duration)
 - Early return — no XAI sections shown for normal videos
 
 **XAI sections (shown for shoplifting/review only):**
+
 1. Detection Evidence (scatter chart + 4 metric cards)
 2. Explainable AI — Decision Reasoning (expandable expander)
 3. Risk Assessment (colour-coded severity banner)
@@ -523,15 +567,19 @@ For NORMAL:
 12. Debug Info (expandable JSON dump for troubleshooting)
 
 ### Tab 3 — POS Audit
+
 Two-panel layout:
+
 - Left: Mock POS Terminal (form with selectbox + quantity input)
 - Right: Behavioural Video Evidence (camera-detected signals)
 - Bottom: Mismatch analysis table
 
 ### Tab 4 — Training Guide
+
 Step-by-step Colab notebook usage instructions.
 
 ### Sidebar
+
 - System status (YOLO / MobileNet / BiLSTM availability with ✓/✗)
 - Model info (accuracy metrics from JSON if available)
 - Quick tips
@@ -541,28 +589,31 @@ Step-by-step Colab notebook usage instructions.
 ## 13. TECHNICAL STACK
 
 ### Core Libraries
-| Library | Version | Purpose |
-|---------|---------|---------|
-| Python | 3.10–3.12 | Runtime |
-| Streamlit | ≥1.32.0 | Web UI framework |
-| OpenCV | ≥4.8.0 | Video I/O, frame annotation |
-| PyTorch | (GPU auto-detected) | BiLSTM and MobileNetV2 inference |
-| torchvision | (with PyTorch) | MobileNetV2 architecture + ImageNet weights |
-| Ultralytics | ≥8.3.0 | YOLO inference + ByteTrack tracking |
-| lapx | ≥0.5.2 | ByteTrack dependency |
-| NumPy | ≥1.24.0 | Array operations |
-| Pandas | ≥2.0.0 | POS transaction tables |
-| Plotly | ≥5.15.0 | Interactive charts (scatter, Gantt, gauge) |
-| Matplotlib | ≥3.7.0 | Training visualisations in notebook |
-| scikit-learn | ≥1.3.0 | Evaluation metrics in notebook |
-| ReportLab | ≥4.0.0 | PDF report generation |
+
+| Library      | Version             | Purpose                                     |
+| ------------ | ------------------- | ------------------------------------------- |
+| Python       | 3.10–3.12           | Runtime                                     |
+| Streamlit    | ≥1.32.0             | Web UI framework                            |
+| OpenCV       | ≥4.8.0              | Video I/O, frame annotation                 |
+| PyTorch      | (GPU auto-detected) | BiLSTM and MobileNetV2 inference            |
+| torchvision  | (with PyTorch)      | MobileNetV2 architecture + ImageNet weights |
+| Ultralytics  | ≥8.3.0              | YOLO inference + ByteTrack tracking         |
+| lapx         | ≥0.5.2              | ByteTrack dependency                        |
+| NumPy        | ≥1.24.0             | Array operations                            |
+| Pandas       | ≥2.0.0              | POS transaction tables                      |
+| Plotly       | ≥5.15.0             | Interactive charts (scatter, Gantt, gauge)  |
+| Matplotlib   | ≥3.7.0              | Training visualisations in notebook         |
+| scikit-learn | ≥1.3.0              | Evaluation metrics in notebook              |
+| ReportLab    | ≥4.0.0              | PDF report generation                       |
 
 ### Compute
+
 - GPU: CUDA auto-detected. If available: FP16 YOLO inference, `torch.backends.cudnn.benchmark=True`
 - CPU fallback: Full float32, same results with slower inference
 - Inference hardware tested on: Windows 10, Intel CPU, NVIDIA GPU (optional)
 
 ### Deployment
+
 - Entry point: `run.py` → `streamlit run app.py`
 - Port: 8501 (default)
 - `--server.headless=true` for headless server deployment
@@ -572,37 +623,41 @@ Step-by-step Colab notebook usage instructions.
 
 ## 14. TRAINED MODELS (FILES)
 
-| File | Description |
-|------|-------------|
-| `models/yolo26n.pt` | COCO-pretrained YOLOv8 nano base weights |
-| `models/yolo26_dw_v2.pt` | Domain-adaptive fine-tune on 24-class retail dataset (preferred) |
-| `models/yolo26_retail.pt` | Retail-only fine-tune (legacy fallback) |
-| `models/mobilenet_dw.pt` | MobileNetV2 binary classifier checkpoint |
-| `models/mobilenet_dw_info.json` | Training metrics: accuracy, confusion matrix, learning curve |
-| `models/mobilenet_test_split.json` | Held-out test set paths + labels (for reproducible evaluation) |
-| `models/bilstm_dw.pt` | BiLSTM + Attention classifier checkpoint |
-| `models/bilstm_dw_info.json` | Training metrics: accuracy, confusion matrix, learning curve |
-| `models/bilstm_test_split.json` | Held-out test set (for Cell 7 evaluation) |
+| File                               | Description                                                      |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `models/yolo26n.pt`                | COCO-pretrained YOLOv8 nano base weights                         |
+| `models/yolo26_dw_v2.pt`           | Domain-adaptive fine-tune on 24-class retail dataset (preferred) |
+| `models/yolo26_retail.pt`          | Retail-only fine-tune (legacy fallback)                          |
+| `models/mobilenet_dw.pt`           | MobileNetV2 binary classifier checkpoint                         |
+| `models/mobilenet_dw_info.json`    | Training metrics: accuracy, confusion matrix, learning curve     |
+| `models/mobilenet_test_split.json` | Held-out test set paths + labels (for reproducible evaluation)   |
+| `models/bilstm_dw.pt`              | BiLSTM + Attention classifier checkpoint                         |
+| `models/bilstm_dw_info.json`       | Training metrics: accuracy, confusion matrix, learning curve     |
+| `models/bilstm_test_split.json`    | Held-out test set (for Cell 7 evaluation)                        |
 
 ---
 
 ## 15. DATA AND TRAINING
 
 ### Training Dataset
+
 - **Video sources:** Retail surveillance footage (normal and shoplifting behaviours)
 - **Annotation tool:** Roboflow (24-class retail annotation)
 - **Frame extraction:** 6fps (FPS_TARGET) from behaviour videos
 - **Person crops:** Extracted using YOLO bounding boxes, resized to 224×224
 
 ### Data Splits (all with seed=42 for reproducibility)
+
 - 80% training / 10% validation / 10% test (stratified by class)
 - Test set held out completely — only used in Cell 6 (MobileNetV2) and Cell 7 (BiLSTM)
 
 ### Class Imbalance Handling
+
 - `WeightedRandomSampler` in both Cell 4 and Cell 5
 - Ensures each training batch sees approximately balanced class representation
 
 ### Data Augmentation
+
 - Standard ImageNet normalisation applied at inference and training
 - Additional augmentations applied during MobileNetV2 training (standard torchvision transforms)
 
@@ -610,19 +665,20 @@ Step-by-step Colab notebook usage instructions.
 
 ## 16. PERFORMANCE METRICS (REPORTED)
 
-| Model | Metric | Value |
-|-------|--------|-------|
-| MobileNetV2 | Validation Accuracy | **97.7%** |
-| BiLSTM | Validation Accuracy | **88.6%** |
-| MobileNetV2 (Phase 1, RandomForest) | Accuracy | 80.0% |
-| MobileNetV2 (Phase 1, RandomForest) | Precision | 80.0% |
-| MobileNetV2 (Phase 1, RandomForest) | Recall | 80.0% |
-| MobileNetV2 (Phase 1, RandomForest) | F1 | 80.0% |
-| MobileNetV2 (Phase 1, RandomForest) | CV Accuracy | 81.5% ± 1.7% |
+| Model                               | Metric              | Value        |
+| ----------------------------------- | ------------------- | ------------ |
+| MobileNetV2                         | Validation Accuracy | **97.7%**    |
+| BiLSTM                              | Validation Accuracy | **88.6%**    |
+| MobileNetV2 (Phase 1, RandomForest) | Accuracy            | 80.0%        |
+| MobileNetV2 (Phase 1, RandomForest) | Precision           | 80.0%        |
+| MobileNetV2 (Phase 1, RandomForest) | Recall              | 80.0%        |
+| MobileNetV2 (Phase 1, RandomForest) | F1                  | 80.0%        |
+| MobileNetV2 (Phase 1, RandomForest) | CV Accuracy         | 81.5% ± 1.7% |
 
 Note: The Phase 1 metrics (80%) are from the original Random Forest classifier on MediaPipe 21-feature hand-pose data. The Phase 2 (current) MobileNetV2 97.7% and BiLSTM 88.6% are from deep learning models trained on the full surveillance video dataset.
 
 **Top 5 features from Phase 1 Random Forest (by importance):**
+
 1. Right elbow angle (mean)
 2. Body velocity (mean)
 3. Left hand-body distance (mean)
@@ -636,6 +692,7 @@ Note: The Phase 1 metrics (80%) are from the original Random Forest classifier o
 This is important for the thesis to articulate the system's evolution.
 
 ### Phase 1 (MVP — original design, now superseded)
+
 - **Pose estimation:** MediaPipe — 33 body landmarks per frame
 - **Feature extraction:** 21 hand/body features manually engineered
 - **Classifier:** scikit-learn Random Forest
@@ -644,6 +701,7 @@ This is important for the thesis to articulate the system's evolution.
 - **Architecture:** `src/` module directory (separate files per component)
 
 ### Phase 2 (Current — single self-contained app.py)
+
 - **Object detection:** YOLO26n with ByteTrack (replaces MediaPipe)
 - **Feature extraction:** MobileNetV2 1280-dim feature vectors (replaces manual features)
 - **Classifier:** BiLSTM + Temporal Attention (replaces Random Forest)
@@ -652,6 +710,7 @@ This is important for the thesis to articulate the system's evolution.
 - **Architecture:** Self-contained `app.py` — no `src/` imports
 
 ### Key architectural difference
+
 Phase 1 used MediaPipe for pose estimation (33 keypoints → manually engineered 21 features → Random Forest). This was intentionally lightweight and interpretable. Phase 2 replaces this with an end-to-end deep learning pipeline that achieves higher accuracy at the cost of requiring GPU for reasonable speed.
 
 ---
@@ -664,7 +723,7 @@ These should be discussed honestly in the thesis limitations section.
 
 2. **YOLO confidence calibration:** Low confidence threshold (YOLO_CONF=0.2) means borderline poses are captured, but also means normal poses at unusual angles may briefly trigger low-confidence shoplifting detections. The 50% classification gate prevents these from affecting the verdict.
 
-3. **No real product identification:** The system detects product *interaction behaviours* (Picking-Holding) but cannot identify which specific product was handled. The POS audit comparison is therefore at the behavioural level, not the product-instance level.
+3. **No real product identification:** The system detects product _interaction behaviours_ (Picking-Holding) but cannot identify which specific product was handled. The POS audit comparison is therefore at the behavioural level, not the product-instance level.
 
 4. **Mock POS only:** The current POS integration is a manual-entry simulation. Real integration would require webhook or API connection to a live POS system.
 
@@ -681,6 +740,7 @@ These should be discussed honestly in the thesis limitations section.
 This section is explicitly important for the thesis.
 
 ### Built-in ethical constraints
+
 1. **No facial recognition** — body pose only, no identity inference possible
 2. **No demographic profiling** — age, gender, race are not used as features
 3. **No personal data storage** — processing is stateless, no footage retained
@@ -688,15 +748,20 @@ This section is explicitly important for the thesis.
 5. **Explainable by design** — every verdict includes a plain-English reasoning section
 
 ### GDPR relevance
+
 The forensic case file (from notebook Cell 11) explicitly references GDPR Article 22 (automated decision-making). The system is designed so that no automated decision directly affects a person — all outputs are advisory inputs to a human decision.
 
 ### Fairness score mechanism
+
 The 0–1 fairness score is displayed on every result. It is penalised when:
+
 - The ML model is untrained (random weights → results are meaningless)
 - External bias factors are present (logged as bias_flags)
 
 ### Vulnerable population handling (planned — Phase 2/3)
+
 The README documents planned edge case handling:
+
 - Children: detect child-sized poses, require adult association for alerts
 - Elderly/confused customers: slower movement patterns, extended dwell time tolerance
 - Items placed back before checkout: put-back gesture tracking
@@ -723,41 +788,41 @@ For the thesis contribution section, these are the novel elements:
 
 ## 21. SYSTEM LIMITATIONS VS. PHASE 2 ROADMAP
 
-| Feature | Current State | Phase 2/3 Target |
-|---------|--------------|-----------------|
-| Video processing | Offline (upload + analyse) | Live RTSP camera feed |
-| POS integration | Manual mock entry | Real-time POS webhook/API |
-| Multi-person | Tracked per video | Cross-camera identity persistence |
-| Speed | ~0.5–2× real-time | ≥15fps real-time |
-| Alerts | In-app display | Push/SMS/email to manager |
-| Explainability | YOLO timeline + BiLSTM attention | SHAP for transactional data |
-| Edge cases | Basic handling | Vulnerable group detection |
-| Deployment | Local/Streamlit Cloud | Low-cost edge hardware |
+| Feature          | Current State                    | Phase 2/3 Target                  |
+| ---------------- | -------------------------------- | --------------------------------- |
+| Video processing | Offline (upload + analyse)       | Live RTSP camera feed             |
+| POS integration  | Manual mock entry                | Real-time POS webhook/API         |
+| Multi-person     | Tracked per video                | Cross-camera identity persistence |
+| Speed            | ~0.5–2× real-time                | ≥15fps real-time                  |
+| Alerts           | In-app display                   | Push/SMS/email to manager         |
+| Explainability   | YOLO timeline + BiLSTM attention | SHAP for transactional data       |
+| Edge cases       | Basic handling                   | Vulnerable group detection        |
+| Deployment       | Local/Streamlit Cloud            | Low-cost edge hardware            |
 
 ---
 
 ## 22. GLOSSARY (FOR THESIS WRITING)
 
-| Term | Definition |
-|------|-----------|
-| XAI | Explainable AI — AI outputs that include human-readable reasoning |
-| YOLO | You Only Look Once — real-time object detection architecture |
-| YOLOv8n | YOLOv8 nano — smallest/fastest variant of YOLOv8 |
-| BiLSTM | Bidirectional LSTM — processes sequences forward AND backward |
-| LSTM | Long Short-Term Memory — RNN variant that retains long-range context |
-| ByteTrack | Multi-object tracking algorithm that assigns persistent IDs across frames |
-| MobileNetV2 | Efficient CNN architecture designed for mobile/embedded inference |
-| Temporal Attention | Learned weighting of sequence positions — produces interpretable frame importance |
-| Temperature Scaling | Dividing logits by T>1 before softmax — reduces overconfident predictions |
-| Intent Score | Weighted risk score 0.0–1.0 computed from behaviour + duration + POS signals |
-| POS | Point of Sale — checkout terminal where transactions are recorded |
-| SKU | Stock Keeping Unit — unique product identifier |
-| Sliding Window | Moving sub-sequence of fixed length extracted from a longer sequence |
-| GDPR Article 22 | EU regulation on automated decision-making affecting individuals |
-| Human-in-the-Loop | System design where a human must review before any action is taken |
-| feat_step | Feature extraction interval — MobileNetV2 runs every feat_step frames |
-| yolo_step | YOLO inference interval — runs every yolo_step frames |
-| WeightedRandomSampler | PyTorch sampler that up-samples minority class to balance training batches |
+| Term                  | Definition                                                                        |
+| --------------------- | --------------------------------------------------------------------------------- |
+| XAI                   | Explainable AI — AI outputs that include human-readable reasoning                 |
+| YOLO                  | You Only Look Once — real-time object detection architecture                      |
+| YOLOv8n               | YOLOv8 nano — smallest/fastest variant of YOLOv8                                  |
+| BiLSTM                | Bidirectional LSTM — processes sequences forward AND backward                     |
+| LSTM                  | Long Short-Term Memory — RNN variant that retains long-range context              |
+| ByteTrack             | Multi-object tracking algorithm that assigns persistent IDs across frames         |
+| MobileNetV2           | Efficient CNN architecture designed for mobile/embedded inference                 |
+| Temporal Attention    | Learned weighting of sequence positions — produces interpretable frame importance |
+| Temperature Scaling   | Dividing logits by T>1 before softmax — reduces overconfident predictions         |
+| Intent Score          | Weighted risk score 0.0–1.0 computed from behaviour + duration + POS signals      |
+| POS                   | Point of Sale — checkout terminal where transactions are recorded                 |
+| SKU                   | Stock Keeping Unit — unique product identifier                                    |
+| Sliding Window        | Moving sub-sequence of fixed length extracted from a longer sequence              |
+| GDPR Article 22       | EU regulation on automated decision-making affecting individuals                  |
+| Human-in-the-Loop     | System design where a human must review before any action is taken                |
+| feat_step             | Feature extraction interval — MobileNetV2 runs every feat_step frames             |
+| yolo_step             | YOLO inference interval — runs every yolo_step frames                             |
+| WeightedRandomSampler | PyTorch sampler that up-samples minority class to balance training batches        |
 
 ---
 
@@ -777,4 +842,4 @@ Based on the system as built, a natural thesis structure would be:
 
 ---
 
-*Document generated: 2026-04-12. Based on codebase at commit state: branch dev3.0. Primary source: app.py (~2180 lines), DigitalWitness_Pipeline.ipynb, README.md.*
+_Document generated: 2026-04-12. Based on codebase at commit state: branch dev3.0. Primary source: app.py (~2180 lines), DigitalWitness_Pipeline.ipynb, README.md._
