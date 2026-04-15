@@ -1,8 +1,8 @@
 """
 app.py - Digital Witness entry point.
 
-Thin orchestrator: session state, tab layout, pipeline dispatch.
-All ML logic lives in core/; all rendering logic lives in ui/.
+session state, tab layout, pipeline dispatch.
+All ML logic lives in core folder and all rendering logic lives in ui folder
 """
 import streamlit as st
 
@@ -38,8 +38,8 @@ class DigitalWitnessApp:
     Responsibilities:
     - Inject CSS once.
     - Initialise session state on first run.
-    - Render header, sidebar, and the three-tab layout.
-    - Dispatch video upload → pipeline → analysis view.
+    - Render header, sidebar and the three-tab layout.
+    - Dispatch video upload pipeline analysis view.
     """
 
     def __init__(self) -> None:
@@ -50,7 +50,6 @@ class DigitalWitnessApp:
         self._pos_view = PosAuditView()
 
     #  Public entry point 
-
     def run(self) -> None:
         st.markdown(CSS_BLOCK, unsafe_allow_html=True)
         self._init_session_state()
@@ -60,7 +59,6 @@ class DigitalWitnessApp:
         self._render_footer()
 
     #  Session state ─
-
     def _init_session_state(self) -> None:
         defaults = {
             "analysis_result": None,
@@ -72,7 +70,6 @@ class DigitalWitnessApp:
                 st.session_state[key] = value
 
     #  Tab layout 
-
     def _render_tabs(self) -> None:
         tab_video, tab_pos = st.tabs(["Video Analysis", "POS Audit"])
         with tab_video:
@@ -81,7 +78,6 @@ class DigitalWitnessApp:
             self._pos_view.render(st.session_state.analysis_result)
 
     #  Video Analysis tab 
-
     def _render_video_tab(self) -> None:
         st.markdown(
             '<div class="section-header">Video Analysis</div>',
@@ -127,8 +123,7 @@ class DigitalWitnessApp:
         if st.session_state.analysis_result is not None:
             self._render_analysis_output()
 
-    #  Pipeline dispatch ─
-
+    #  Pipeline dispatch
     def _run_analysis(self, uploaded) -> None:
         import uuid
         suffix     = Path(uploaded.name).suffix or ".mp4"
@@ -240,7 +235,7 @@ class DigitalWitnessApp:
                     e for e in (result.behaviour_events or [])
                     if e.behavior_type in _SUSP
                 ]
-                # Fallback: YOLO segments - most common path when LSTM model
+                # Fallback YOLO segments - most common path when LSTM model
                 # outputs all-normal but YOLO peak triggered the shoplifting verdict
                 if not clip_events and result.yolo_segments:
                     from core.result_types import BehaviourEvent
@@ -271,8 +266,7 @@ class DigitalWitnessApp:
             except OSError:
                 pass
 
-    #  Analysis output ─
-
+    #  Analysis output 
     def _render_analysis_output(self) -> None:
         result: PipelineResult = st.session_state.analysis_result
         if result is None:
@@ -283,7 +277,6 @@ class DigitalWitnessApp:
         self._analysis_view.render(result)
 
     #  Footer 
-
     def _render_footer(self) -> None:
         st.markdown("---")
         st.markdown(
@@ -295,10 +288,9 @@ class DigitalWitnessApp:
         )
 
 
-#  Entry point ─
-
+#  Entry point 
 if __name__ == "__main__":
     DigitalWitnessApp().run()
 else:
-    # Streamlit executes the module directly (not via __main__)
+    # Streamlit executes the module directly (not __main__)
     DigitalWitnessApp().run()

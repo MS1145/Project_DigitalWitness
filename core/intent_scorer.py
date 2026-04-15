@@ -13,8 +13,8 @@ class IntentScorer:
     """
     Stateless scorer.  Given YOLO and BiLSTM signals, produces an IntentScore.
 
-    Shoplifting path  : score = peak_conf × (0.5 + 0.5 × sustained_factor)
-    Normal path       : score = 0.50 × concealment + 0.35 × bypass + 0.15 × duration
+    Shoplifting path: score = peak_conf × (0.5 + 0.5 × sustained_factor)
+    Normal path: score = 0.50 × concealment + 0.35 × bypass + 0.15 × duration
     """
 
     _SEVERITY_BANDS = [
@@ -33,11 +33,11 @@ class IntentScorer:
               video_duration:   float) -> IntentScore:
         """
         Args:
-            overall_class    : "shoplifting" | "normal"
-            yolo_peak        : highest per-frame YOLO shoplifting confidence
-            shop_segs_count  : number of 30-frame segments with peak ≥ 50%
-            behaviour_events : BiLSTM per-window predictions
-            video_duration   : total video duration in seconds
+            overall_class: "shoplifting" | "normal"
+            yolo_peak: highest per-frame YOLO shoplifting confidence
+            shop_segs_count: number of 30-frame segments with peak ≥ 50%
+            behaviour_events: BiLSTM per-window predictions
+            video_duration: total video duration in seconds
 
         Returns:
             IntentScore

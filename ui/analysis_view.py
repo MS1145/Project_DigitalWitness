@@ -27,10 +27,10 @@ _CLASS_COLOURS = {
 
 _SEV_CSS = {
     "CRITICAL": "alert-critical",
-    "HIGH"    : "alert-high",
-    "MEDIUM"  : "alert-medium",
-    "LOW"     : "alert-low",
-    "NONE"    : "alert-none",
+    "HIGH": "alert-high",
+    "MEDIUM": "alert-medium",
+    "LOW": "alert-low",
+    "NONE": "alert-none",
 }
 
 
@@ -260,9 +260,8 @@ class AnalysisView:
         st.warning("**Advisory System** - This is a pattern match, NOT definitive proof. "
                    "Human review is mandatory before any action is taken.")
 
-    # ══════════════════════════════════════════════════════════════════════════
+
     # TECHNICAL ANALYSIS TAB
-    # ══════════════════════════════════════════════════════════════════════════
 
     def _render_technical_tab(self, result: PipelineResult) -> None:
         self._render_step1_yolo(result)
@@ -458,7 +457,6 @@ No segment counting, no vote accumulation - only the highest confidence frame de
         st.markdown("---")
 
     #  Static helpers 
-
     @staticmethod
     def _yolo_priority(cls: str) -> int:
         """Sort order for YOLO class display (most suspicious first)."""

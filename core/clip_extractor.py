@@ -20,10 +20,10 @@ class ClipExtractor:
     collapsed to the highest-confidence one, preventing near-duplicate clips.
     """
 
-    MAX_W:   int   = 480     # max pixel width for GIF frames
-    GIF_FPS: int   = 8       # output frame rate
-    PAD_S:   float = 1.0     # seconds of padding around each window
-    MIN_GAP: float = 2.0     # minimum seconds between clip midpoints
+    MAX_W:   int   = 480 # max pixel width for GIF frames
+    GIF_FPS: int   = 8   # output frame rate
+    PAD_S:   float = 1.0 # seconds of padding around each window
+    MIN_GAP: float = 2.0 # minimum seconds between clip midpoints
 
     _SUSPICIOUS = frozenset({"shoplifting", "Looking around", "concealment", "bypass"})
 
@@ -125,7 +125,6 @@ class ClipExtractor:
         return clips
 
     #  Accessors that work for both BehaviourEvent and legacy dict ─
-
     @staticmethod
     def _behavior(e) -> str:
         return e.behavior_type if isinstance(e, BehaviourEvent) else e.get("behavior_type", "")

@@ -18,8 +18,8 @@ class MobileNetExtractor(nn.Module):
     The classifier head is kept for checkpoint compatibility but is not used
     during inference - only extract_features() is called by FeatureExtractor.
 
-    Input  : (B, 3, 224, 224) normalised tensor
-    Output : (B, 1280) feature vector
+    Input: (B, 3, 224, 224) normalised tensor
+    Output: (B, 1280) feature vector
     """
 
     def __init__(self) -> None:
@@ -66,8 +66,8 @@ class TemporalAttention(nn.Module):
         Args:
             lstm_out: (B, T, hidden_size)
         Returns:
-            context : (B, hidden_size) - attended context vector
-            weights : (B, T)           - per-frame attention weights
+            context: (B, hidden_size) - attended context vector
+            weights: (B, T) - per-frame attention weights
         """
         scores  = self.attn(lstm_out).squeeze(-1)      # (B, T)
         weights = torch.softmax(scores, dim=1)           # (B, T)

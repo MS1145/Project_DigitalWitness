@@ -15,10 +15,10 @@ from core.result_types import BehaviourEvent, LstmVerdict
 class BehaviourClassifier:
     """
     Wraps BiLSTMAttentionClassifier with:
-      - checkpoint loading
-      - sliding-window inference over the full feature array
-      - short-video padding
-      - rolling single-window inference for the live badge
+        checkpoint loading
+        sliding-window inference over the full feature array
+        short-video padding
+        rolling single-window inference for the live badge
     """
 
     TEMPERATURE = 3.0   # flatten overconfident softmax distributions
@@ -39,7 +39,6 @@ class BehaviourClassifier:
         self._model.eval()
 
     #  Full-video inference 
-
     def classify_sequence(self,
                           features: list[np.ndarray],
                           video_duration: float,
@@ -90,7 +89,6 @@ class BehaviourClassifier:
         return events
 
     #  Rolling live badge inference 
-
     def rolling_predict(self, recent_features: list[np.ndarray]) -> tuple[str, float]:
         """
         Single forward pass over the last lstm_seq_len features.
@@ -103,8 +101,7 @@ class BehaviourClassifier:
         conf  = min(float(np.max(probs)), 0.99)
         return label, conf
 
-    #  Private helpers ─
-
+    #  Private helpers
     def _infer(self, seq: np.ndarray) -> np.ndarray:
         """Run one forward pass and return softmax probabilities."""
         x_t = torch.FloatTensor(seq[np.newaxis]).to(self._device)

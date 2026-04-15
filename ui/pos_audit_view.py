@@ -39,7 +39,6 @@ class PosAuditView:
         self._render_mismatch_audit(result)
 
     #  Private section renderers ─
-
     def _render_pos_terminal(self) -> None:
         st.markdown("### Mock POS Terminal")
         st.caption("Enter items as they are being rung up at the checkout.")

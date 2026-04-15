@@ -6,9 +6,9 @@ Sequence:
   2. Instantiate FeatureExtractor + BehaviourClassifier
   3. Iterate frames via VideoFrameIterator
      - Per frame: YOLO detect, MobileNet feature extract, rolling BiLSTM badge
-  4. classify_sequence() → behaviour_events, lstm_verdict
+  4. classify_sequence() - behaviour_events, lstm_verdict
   5. IntentScorer.score()
-  6. BiasAssessor.assess() → bias_report, adjusted_score
+  6. BiasAssessor.assess() - bias_report, adjusted_score
   7. AlertGenerator.generate()
   8. Assemble PipelineResult
 """
@@ -71,7 +71,7 @@ class YOLODetectorWrapper:
 class AnalysisPipeline:
     """
     End-to-end video analysis pipeline.
-    Stateless - a new analysis is started fresh on each call to run().
+    Stateless- a new analysis is started fresh on each call to run().
     """
 
     def __init__(self, registry: ModelRegistry,
@@ -340,8 +340,7 @@ class AnalysisPipeline:
             annotated_video_path = visual_out_path,
         )
 
-    #  Private helpers ─
-
+    #  Private helpers 
     @staticmethod
     def _device() -> torch.device:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")

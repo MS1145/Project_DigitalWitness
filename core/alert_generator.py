@@ -24,9 +24,9 @@ class AlertGenerator:
                  n_suspicious_events: int) -> AlertRecord | None:
         """
         Args:
-            adjusted_score       : bias-adjusted intent score (0–1)
-            severity             : severity label from IntentScorer
-            n_suspicious_events  : total count of shoplifting + look-around windows
+            adjusted_score: bias-adjusted intent score (0–1)
+            severity: severity label from IntentScorer
+            n_suspicious_events: total count of shoplifting + look-around windows
 
         Returns:
             AlertRecord if score ≥ threshold, else None

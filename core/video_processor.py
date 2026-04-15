@@ -53,8 +53,8 @@ class VideoFrameIterator:
         for frame, detections, frame_num in iterator:
             ...
         iterator.release()
-        meta     = iterator.metadata
-        segments = iterator.build_yolo_segments(fps)
+        meta= iterator.metadata
+        segments= iterator.build_yolo_segments(fps)
     """
 
     BEHAVIOUR_4CLS = frozenset({"Looking around", "Picking-Holding", "normal", "shoplifting"})
