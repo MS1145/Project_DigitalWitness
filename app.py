@@ -241,10 +241,32 @@ class DigitalWitnessApp:
                 live_frame_callback=on_live_frame,
             )
             # Extract forensic clips while the temp file still exists
-            if result.success and not result.early_exit and result.behaviour_events:
-                result.suspicious_frames = self._clip_extractor.extract(
-                    tmp_path, result.behaviour_events
-                )
+            if result.success and not result.early_exit:
+                _SUSP = {"shoplifting", "Looking around", "concealment", "bypass"}
+                # Prefer LSTM shoplifting/suspicious events
+                clip_events = [
+                    e for e in (result.behaviour_events or [])
+                    if e.behavior_type in _SUSP
+                ]
+                # Fallback: YOLO segments — most common path when LSTM model
+                # outputs all-normal but YOLO peak triggered the shoplifting verdict
+                if not clip_events and result.yolo_segments:
+                    from core.result_types import BehaviourEvent
+                    clip_events = [
+                        BehaviourEvent(
+                            behavior_type = s.dominant_class,
+                            start_time    = s.start_time,
+                            end_time      = s.end_time,
+                            confidence    = s.max_shop_conf,
+                            probabilities = {},
+                        )
+                        for s in result.yolo_segments
+                        if s.dominant_class in _SUSP or s.max_shop_conf >= 0.30
+                    ]
+                if clip_events:
+                    result.suspicious_frames = self._clip_extractor.extract(
+                        tmp_path, clip_events
+                    )
             st.session_state.analysis_result = result
         finally:
             _frame_ph.empty()
