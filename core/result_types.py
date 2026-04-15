@@ -1,5 +1,5 @@
 """
-result_types.py — Typed value objects that cross the pipeline → UI boundary.
+result_types.py - Typed value objects that cross the pipeline → UI boundary.
 
 All dataclasses are immutable (frozen=True) except PipelineResult, which
 needs suspicious_frames appended after the pipeline completes.

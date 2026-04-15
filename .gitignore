@@ -23,7 +23,7 @@ __pycache__/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Dataset (large files — do not commit)
+# Dataset (large files - do not commit)
 data/
 frames/
 

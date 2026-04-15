@@ -1,5 +1,5 @@
 """
-alert_generator.py — Rule-based alert generation.
+alert_generator.py - Rule-based alert generation.
 
 Single responsibility: decide whether an adjusted risk score warrants an
 alert and, if so, construct the AlertRecord.
@@ -38,7 +38,6 @@ class AlertGenerator:
             alert_id = f"ALERT-{datetime.now().strftime('%Y%m%d%H%M%S')}-0001",
             level    = severity,
             message  = (
-                f"{n_suspicious_events} suspicious event(s) detected. "
                 f"Adjusted risk score: {adjusted_score:.2f} ({severity}). "
                 "Human review required before any action."
             ),

@@ -1,8 +1,8 @@
 """
-model_registry.py — Discovers and validates model weight files on disk.
+model_registry.py - Discovers and validates model weight files on disk.
 
 Single responsibility: know which files exist and expose validated paths.
-No model loading — that is delegated to FeatureExtractor and BehaviourClassifier.
+No model loading - that is delegated to FeatureExtractor and BehaviourClassifier.
 """
 from __future__ import annotations
 import json
@@ -20,7 +20,7 @@ class ModelRegistry:
     def __init__(self, paths: ModelPaths = DEFAULT_PATHS) -> None:
         self._paths = paths
 
-    # ── Model path resolution ─────────────────────────────────────────────────
+    #  Model path resolution ─
 
     def active_yolo_path(self) -> str:
         """
@@ -35,7 +35,7 @@ class ModelRegistry:
         # Last resort: let ultralytics auto-download the base
         return str(self._paths.yolo_base)
 
-    # ── Availability checks ───────────────────────────────────────────────────
+    #  Availability checks ─
 
     def bilstm_exists(self) -> bool:
         return self._paths.bilstm.exists()
@@ -60,7 +60,7 @@ class ModelRegistry:
             "all_ready"       : yolo_ready and mobilenet_ready and bilstm_ready,
         }
 
-    # ── Metric file loading ───────────────────────────────────────────────────
+    #  Metric file loading ─
 
     def load_bilstm_info(self) -> dict | None:
         """Return parsed bilstm_dw_info.json or None if not present."""
@@ -74,7 +74,7 @@ class ModelRegistry:
     def paths(self) -> ModelPaths:
         return self._paths
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    #  Private helpers ─
 
     @staticmethod
     def _load_json(path: Path) -> dict | None:

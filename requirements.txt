@@ -1,5 +1,5 @@
 # ============================================================
-# Digital Witness — Python Dependencies
+# Digital Witness - Python Dependencies
 # Python 3.10, 3.11, or 3.12 required
 #
 # DO NOT run this directly with pip install -r

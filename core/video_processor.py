@@ -1,5 +1,5 @@
 """
-video_processor.py — OpenCV video I/O, YOLO detection/tracking, and frame annotation.
+video_processor.py - OpenCV video I/O, YOLO detection/tracking, and frame annotation.
 
 VideoFrameIterator handles all frame-level YOLO operations so the pipeline
 can focus on feature extraction and classification.
@@ -87,7 +87,7 @@ class VideoFrameIterator:
                 visual_out_path, fourcc, self._fps, (self._width, self._height)
             )
 
-    # ── Iterator protocol ─────────────────────────────────────────────────────
+    #  Iterator protocol ─
 
     def __iter__(self):
         last_yolo_result = None
@@ -138,7 +138,7 @@ class VideoFrameIterator:
             self._writer.write(ann)
         return ann
 
-    # ── Segment timeline builder ──────────────────────────────────────────────
+    #  Segment timeline builder 
 
     def build_yolo_segments(self, duration: float) -> list[YoloSegment]:
         """Aggregate per-frame YOLO labels into 30-frame timeline segments."""
@@ -164,14 +164,14 @@ class VideoFrameIterator:
             ))
         return segments
 
-    # ── Resource management ───────────────────────────────────────────────────
+    #  Resource management ─
 
     def release(self) -> None:
         if self._writer:
             self._writer.release()
         self._cap.release()
 
-    # ── Properties ───────────────────────────────────────────────────────────
+    #  Properties ─
 
     @property
     def metadata(self) -> VideoMetadata:
@@ -196,7 +196,7 @@ class VideoFrameIterator:
     def frame_labels(self) -> list[tuple[int, str, float]]:
         return self._frame_labels
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    #  Private helpers ─
 
     def _parse_detections(self, yolo_result, frame_num: int) -> FrameDetections:
         """Parse a raw YOLO result into a FrameDetections object."""

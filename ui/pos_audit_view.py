@@ -1,5 +1,5 @@
 """
-ui/pos_audit_view.py — Mock POS terminal and transaction-vs-video mismatch audit.
+ui/pos_audit_view.py - Mock POS terminal and transaction-vs-video mismatch audit.
 """
 from __future__ import annotations
 import pandas as pd
@@ -14,9 +14,9 @@ class PosAuditView:
     """
     Renders the POS Audit tab.
 
-    Left  — Manual POS entry: user picks items + quantities.
-    Right — Video evidence: behavioural signals from the pipeline.
-    Bottom — Mismatch table: flags items detected but not rung up.
+    Left  - Manual POS entry: user picks items + quantities.
+    Right - Video evidence: behavioural signals from the pipeline.
+    Bottom - Mismatch table: flags items detected but not rung up.
     """
 
     def render(self, result: PipelineResult | None) -> None:
@@ -38,7 +38,7 @@ class PosAuditView:
         st.markdown("---")
         self._render_mismatch_audit(result)
 
-    # ── Private section renderers ─────────────────────────────────────────────
+    #  Private section renderers ─
 
     def _render_pos_terminal(self) -> None:
         st.markdown("### Mock POS Terminal")
@@ -101,10 +101,10 @@ class PosAuditView:
         vid_rows = [
             {"Behavioural Signal": "Persons tracked",
              "Count": det.persons_tracked if det else 0,
-             "Risk" : "—"},
+             "Risk" : "-"},
             {"Behavioural Signal": "Item interaction (Picking-Holding)",
              "Count": picking_count,
-             "Risk" : "Possible" if picking_count > 0 else "—"},
+             "Risk" : "Possible" if picking_count > 0 else "-"},
             {"Behavioural Signal": "Suspicious behaviour windows (LSTM)",
              "Count": susp_windows,
              "Risk" : "High" if susp_windows > 0 else "None"},
@@ -116,12 +116,12 @@ class PosAuditView:
 
         if verdict and verdict.is_shoplifting:
             st.error(
-                f"LSTM verdict: **SHOPLIFTING** ({verdict.confidence:.0%}) — "
+                f"LSTM verdict: **SHOPLIFTING** ({verdict.confidence:.0%}) - "
                 "transaction flagged for review."
             )
         elif verdict:
             st.success(
-                f"LSTM verdict: **NORMAL** ({verdict.confidence:.0%}) — "
+                f"LSTM verdict: **NORMAL** ({verdict.confidence:.0%}) - "
                 "no shoplifting pattern detected."
             )
 
@@ -176,7 +176,7 @@ class PosAuditView:
         if picking_count > pos_total_qty:
             flags.append(
                 f"**{picking_count} item interaction(s)** detected but only "
-                f"**{pos_total_qty} item(s)** scanned at POS — potential scan avoidance."
+                f"**{pos_total_qty} item(s)** scanned at POS - potential scan avoidance."
             )
         if is_shop and pos_total_qty == 0:
             flags.append(
@@ -189,7 +189,7 @@ class PosAuditView:
                 st.error(f)
             st.warning("**Human review required** before any action is taken.")
         else:
-            st.success("No mismatches found — POS transaction consistent with video evidence.")
+            st.success("No mismatches found - POS transaction consistent with video evidence.")
 
         fig = go.Figure()
         fig.add_bar(name="POS Items Scanned",

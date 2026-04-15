@@ -1,5 +1,5 @@
 """
-config.py — Application-wide constants and paths.
+config.py - Application-wide constants and paths.
 
 All values live in AppConfig. No logic, no I/O. Import this instead of
 defining constants at module level in app.py.
@@ -43,7 +43,7 @@ class PipelineParams:
     behavior_classes: tuple = ("normal", "shoplifting")
 
 
-# Singleton-style defaults — callers import these directly
+# Singleton-style defaults - callers import these directly
 DEFAULT_PATHS  = ModelPaths()
 DEFAULT_PARAMS = PipelineParams()
 

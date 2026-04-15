@@ -1,4 +1,4 @@
-"""ui/styles.py — Application CSS, injected once at startup."""
+"""ui/styles.py - Application CSS, injected once at startup."""
 
 CSS_BLOCK: str = """
 <style>

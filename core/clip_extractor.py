@@ -1,5 +1,5 @@
 """
-clip_extractor.py — Extracts animated GIF clips from shoplifting windows.
+clip_extractor.py - Extracts animated GIF clips from shoplifting windows.
 """
 from __future__ import annotations
 import cv2
@@ -124,7 +124,7 @@ class ClipExtractor:
         cap.release()
         return clips
 
-    # ── Accessors that work for both BehaviourEvent and legacy dict ───────────
+    #  Accessors that work for both BehaviourEvent and legacy dict ─
 
     @staticmethod
     def _behavior(e) -> str:

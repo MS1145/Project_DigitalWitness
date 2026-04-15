@@ -1,12 +1,12 @@
 """
-app.py — Digital Witness entry point.
+app.py - Digital Witness entry point.
 
 Thin orchestrator: session state, tab layout, pipeline dispatch.
 All ML logic lives in core/; all rendering logic lives in ui/.
 """
 import streamlit as st
 
-# ── Page config MUST be the very first Streamlit call ────────────────────────
+#  Page config MUST be the very first Streamlit call 
 st.set_page_config(
     page_title="Digital Witness - Retail Security Assistant",
     page_icon=None,
@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Remaining imports (after set_page_config) ────────────────────────────────
+#  Remaining imports (after set_page_config) 
 import tempfile
 import os
 from pathlib import Path
@@ -51,7 +51,7 @@ class DigitalWitnessApp:
         self._perf_view = ModelPerformanceView(self._registry)
         self._pos_view = PosAuditView()
 
-    # ── Public entry point ────────────────────────────────────────────────────
+    #  Public entry point 
 
     def run(self) -> None:
         st.markdown(CSS_BLOCK, unsafe_allow_html=True)
@@ -61,7 +61,7 @@ class DigitalWitnessApp:
         self._render_tabs()
         self._render_footer()
 
-    # ── Session state ─────────────────────────────────────────────────────────
+    #  Session state ─
 
     def _init_session_state(self) -> None:
         defaults = {
@@ -73,7 +73,7 @@ class DigitalWitnessApp:
             if key not in st.session_state:
                 st.session_state[key] = value
 
-    # ── Tab layout ────────────────────────────────────────────────────────────
+    #  Tab layout 
 
     def _render_tabs(self) -> None:
         tab_video, tab_perf, tab_pos = st.tabs([
@@ -88,7 +88,7 @@ class DigitalWitnessApp:
         with tab_pos:
             self._pos_view.render(st.session_state.analysis_result)
 
-    # ── Video Analysis tab ────────────────────────────────────────────────────
+    #  Video Analysis tab 
 
     def _render_video_tab(self) -> None:
         st.markdown(
@@ -135,7 +135,7 @@ class DigitalWitnessApp:
         if st.session_state.analysis_result is not None:
             self._render_analysis_output()
 
-    # ── Pipeline dispatch ─────────────────────────────────────────────────────
+    #  Pipeline dispatch ─
 
     def _run_analysis(self, uploaded) -> None:
         import uuid
@@ -148,10 +148,10 @@ class DigitalWitnessApp:
             f"dw_annotated_{uuid.uuid4().hex[:8]}.mp4",
         )
 
-        # ── Live preview layout (created once; only placeholders updated) ──────
+        #  Live preview layout (created once; only placeholders updated) 
         st.markdown("### Live Analysis Preview")
         st.caption(
-            "Watch the pipeline analyse your video — YOLO detections with "
+            "Watch the pipeline analyse your video - YOLO detections with "
             "coloured bounding boxes, classification badge and stats update in real time."
         )
         _col_frame, _col_stats = st.columns([3, 1])
@@ -175,14 +175,14 @@ class DigitalWitnessApp:
             _status.text(msg)
 
         def on_live_frame(frame_rgb, frame_num: int, total: int, stats: dict) -> None:
-            # ── Annotated frame ───────────────────────────────────────────────
+            #  Annotated frame ─
             _frame_ph.image(
                 frame_rgb,
                 caption=f"Frame {frame_num} / {total}",
                 use_container_width=True,
             )
 
-            # ── Dark stats panel ──────────────────────────────────────────────
+            #  Dark stats panel 
             label    = stats.get("label", "Analyzing...")
             conf     = stats.get("conf", 0.0)
             persons  = stats.get("persons_tracked", 0)
@@ -208,7 +208,7 @@ class DigitalWitnessApp:
                     {products}</p>
             </div>""", unsafe_allow_html=True)
 
-            # ── Colour timeline bar ───────────────────────────────────────────
+            #  Colour timeline bar ─
             timeline = stats.get("timeline", [])
             if timeline:
                 pct  = frame_num / max(total, 1)
@@ -248,7 +248,7 @@ class DigitalWitnessApp:
                     e for e in (result.behaviour_events or [])
                     if e.behavior_type in _SUSP
                 ]
-                # Fallback: YOLO segments — most common path when LSTM model
+                # Fallback: YOLO segments - most common path when LSTM model
                 # outputs all-normal but YOLO peak triggered the shoplifting verdict
                 if not clip_events and result.yolo_segments:
                     from core.result_types import BehaviourEvent
@@ -279,7 +279,7 @@ class DigitalWitnessApp:
             except OSError:
                 pass
 
-    # ── Analysis output ───────────────────────────────────────────────────────
+    #  Analysis output ─
 
     def _render_analysis_output(self) -> None:
         result: PipelineResult = st.session_state.analysis_result
@@ -290,20 +290,20 @@ class DigitalWitnessApp:
             return
         self._analysis_view.render(result)
 
-    # ── Footer ────────────────────────────────────────────────────────────────
+    #  Footer 
 
     def _render_footer(self) -> None:
         st.markdown("---")
         st.markdown(
             '<p style="text-align:center;color:#999;font-size:0.85rem;">'
-            "Digital Witness — Final Year Project 2026 | "
+            "Digital Witness - Final Year Project 2026 | "
             "Advisory system only. All alerts require human validation."
             "</p>",
             unsafe_allow_html=True,
         )
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+#  Entry point ─
 
 if __name__ == "__main__":
     DigitalWitnessApp().run()

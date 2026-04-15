@@ -47,7 +47,7 @@ Additionally, existing systems often treat behavioural evidence and POS transact
 
 ## Product Vision
 
-Digital Witness is designed as a **Blameless AI Assistant** that supports — not replaces — human decision-making in retail security.
+Digital Witness is designed as a **Blameless AI Assistant** that supports - not replaces - human decision-making in retail security.
 
 The system analyses a customer's **physical interaction with products** and correlates it with **POS transaction data** to determine whether all products taken by the customer have been billed.
 
@@ -58,7 +58,7 @@ The system does **not** determine guilt or confirm shoplifting. Instead, it prov
 - Short digital forensic video clips highlighting suspicious moments
 - Clear, human-readable explanations supporting review
 
-All alerts are **advisory**. Final accountability and decisions — including whether to assist a customer, dismiss an alert, or escalate to store management — always remain with a **human operator**.
+All alerts are **advisory**. Final accountability and decisions - including whether to assist a customer, dismiss an alert, or escalate to store management - always remain with a **human operator**.
 
 ---
 
@@ -66,15 +66,15 @@ All alerts are **advisory**. Final accountability and decisions — including wh
 
 ### Core Capabilities
 
-| Capability | Description |
-|------------|-------------|
-| **Pose-Based Behavior Analysis** | Uses MediaPipe to extract 33 body landmarks and analyze movement patterns |
-| **Machine Learning Classification** | Random Forest classifier trained on real video data |
-| **POS Data Correlation** | Cross-references detected behaviors with billing records |
-| **Explainable AI** | Provides clear reasoning for all assessments with confidence scores |
-| **Interactive Web UI** | Streamlit-based dashboard for video upload and analysis |
-| **Human-in-the-Loop** | All alerts are advisory and require human validation |
-| **Digital Forensics** | Extracts video clips of key moments for review |
+| Capability                          | Description                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| **Pose-Based Behavior Analysis**    | Uses MediaPipe to extract 33 body landmarks and analyze movement patterns |
+| **Machine Learning Classification** | Random Forest classifier trained on real video data                       |
+| **POS Data Correlation**            | Cross-references detected behaviors with billing records                  |
+| **Explainable AI**                  | Provides clear reasoning for all assessments with confidence scores       |
+| **Interactive Web UI**              | Streamlit-based dashboard for video upload and analysis                   |
+| **Human-in-the-Loop**               | All alerts are advisory and require human validation                      |
+| **Digital Forensics**               | Extracts video clips of key moments for review                            |
 
 ### Design Principles
 
@@ -85,6 +85,7 @@ Digital Witness intentionally builds upon **established open-source AI models** 
 - No facial recognition or identity inference
 
 **Original contributions:**
+
 - Behavioural and transactional data fusion
 - Intent risk inference across full customer journeys
 - Explainable digital forensic evidence generation
@@ -103,12 +104,14 @@ Digital Witness intentionally builds upon **established open-source AI models** 
 ### Setup
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/yourusername/Project_DigitalWitness.git
    cd Project_DigitalWitness
    ```
 
 2. **Create virtual environment**
+
    ```bash
    python -m venv .venv
 
@@ -120,6 +123,7 @@ Digital Witness intentionally builds upon **established open-source AI models** 
    ```
 
 3. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -166,6 +170,7 @@ python run.py
 #### Tab 1: Model Performance
 
 View model metrics including:
+
 - Accuracy, Precision, Recall, F1-Score
 - Cross-validation results
 - Confusion matrix visualization
@@ -192,31 +197,32 @@ View model metrics including:
 ### 10-Step Analysis Pipeline
 
 ```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Load Video  │───▶│    Pose      │───▶│   Feature    │
+┌┐    ┌┐    ┌┐
+│  Load Video  │─▶│    Pose      │─▶│   Feature    │
 │              │    │  Estimation  │    │  Extraction  │
-└──────────────┘    └──────────────┘    └──────┬───────┘
+└┘    └┘    └┬─┘
                                                │
-┌──────────────┐    ┌──────────────┐           ▼
-│  Load POS    │───▶│ Cross-Check  │◀───┌──────────────┐
+┌┐    ┌┐           ▼
+│  Load POS    │─▶│ Cross-Check  │◀─┌┐
 │    Data      │    │              │    │  Behavior    │
-└──────────────┘    └──────┬───────┘    │Classification│
-                           │            └──────────────┘
+└┘    └┬─┘    │Classification│
+                           │            └┘
                            ▼
-                    ┌──────────────┐
+                    ┌┐
                     │ Intent Score │
                     │ Calculation  │
-                    └──────┬───────┘
+                    └┬─┘
                            │
-         ┌─────────────────┼─────────────────┐
+         ┌─┼─┐
          ▼                 ▼                 ▼
-  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  ┌┐  ┌┐  ┌┐
   │   Generate   │  │   Extract    │  │    Build     │
   │    Alert     │  │    Clips     │  │  Case File   │
-  └──────────────┘  └──────────────┘  └──────────────┘
+  └┘  └┘  └┘
 ```
 
 **Steps:**
+
 1. **Load Video** - Extract frames and metadata using OpenCV
 2. **Pose Estimation** - MediaPipe extracts 33 body landmarks per frame
 3. **Feature Extraction** - Sliding windows (30 frames) generate 21 features
@@ -238,21 +244,21 @@ View model metrics including:
 
 ### Intent Scoring Weights
 
-| Component | Weight | Description |
-|-----------|--------|-------------|
-| Discrepancy | 40% | Items detected but not billed |
-| Concealment | 30% | Hiding behavior detected |
-| Bypass | 20% | Checkout avoidance patterns |
-| Duration | 10% | Length of suspicious activity |
+| Component   | Weight | Description                   |
+| ----------- | ------ | ----------------------------- |
+| Discrepancy | 40%    | Items detected but not billed |
+| Concealment | 30%    | Hiding behavior detected      |
+| Bypass      | 20%    | Checkout avoidance patterns   |
+| Duration    | 10%    | Length of suspicious activity |
 
 ### Risk Levels
 
-| Level | Score Range | Action |
-|-------|-------------|--------|
-| NONE | < 0.3 | Normal behavior |
-| LOW | 0.3 - 0.5 | Minor anomalies |
-| MEDIUM | 0.5 - 0.7 | Review recommended |
-| HIGH | ≥ 0.7 | Immediate review required |
+| Level  | Score Range | Action                    |
+| ------ | ----------- | ------------------------- |
+| NONE   | < 0.3       | Normal behavior           |
+| LOW    | 0.3 - 0.5   | Minor anomalies           |
+| MEDIUM | 0.5 - 0.7   | Review recommended        |
+| HIGH   | ≥ 0.7       | Immediate review required |
 
 ---
 
@@ -260,66 +266,66 @@ View model metrics including:
 
 ```
 Project_DigitalWitness/
-├── run.py                      # Unified entry point (--ui, --train, analysis)
-├── app.py                      # Streamlit web UI
-├── requirements.txt            # Python dependencies
-├── packages.txt                # System dependencies (for cloud)
+├ run.py                      # Unified entry point (--ui, --train, analysis)
+├ app.py                      # Streamlit web UI
+├ requirements.txt            # Python dependencies
+├ packages.txt                # System dependencies (for cloud)
 │
-├── src/                        # Source code
-│   ├── config.py               # Configuration constants
-│   ├── main.py                 # Pipeline orchestration
+├ src/                        # Source code
+│   ├ config.py               # Configuration constants
+│   ├ main.py                 # Pipeline orchestration
 │   │
-│   ├── video/                  # Video processing
-│   │   ├── loader.py           # Video loading utilities
-│   │   └── clip_extractor.py   # Forensic clip extraction
+│   ├ video/                  # Video processing
+│   │   ├ loader.py           # Video loading utilities
+│   │   └ clip_extractor.py   # Forensic clip extraction
 │   │
-│   ├── pose/                   # Pose estimation & ML
-│   │   ├── estimator.py        # MediaPipe pose detection
-│   │   ├── feature_extractor.py    # 21-feature extraction
-│   │   ├── behavior_classifier.py  # Random Forest classifier
-│   │   └── train_video_classifier.py  # Training pipeline
+│   ├ pose/                   # Pose estimation & ML
+│   │   ├ estimator.py        # MediaPipe pose detection
+│   │   ├ feature_extractor.py    # 21-feature extraction
+│   │   ├ behavior_classifier.py  # Random Forest classifier
+│   │   └ train_video_classifier.py  # Training pipeline
 │   │
-│   ├── pos/                    # POS data handling
-│   │   ├── data_loader.py      # JSON transaction parser
-│   │   └── mock_generator.py   # Test data generation
+│   ├ pos/                    # POS data handling
+│   │   ├ data_loader.py      # JSON transaction parser
+│   │   └ mock_generator.py   # Test data generation
 │   │
-│   ├── analysis/               # Core analysis
-│   │   ├── cross_checker.py    # Video-POS reconciliation
-│   │   ├── intent_scorer.py    # Risk scoring engine
-│   │   └── alert_generator.py  # Advisory alert creation
+│   ├ analysis/               # Core analysis
+│   │   ├ cross_checker.py    # Video-POS reconciliation
+│   │   ├ intent_scorer.py    # Risk scoring engine
+│   │   └ alert_generator.py  # Advisory alert creation
 │   │
-│   └── output/
-│       └── case_builder.py     # Case file generation
+│   └ output/
+│       └ case_builder.py     # Case file generation
 │
-├── models/                     # Trained models
-│   ├── behavior_classifier.pkl
-│   └── behavior_classifier_info.json
+├ models/                     # Trained models
+│   ├ behavior_classifier.pkl
+│   └ behavior_classifier_info.json
 │
-├── data/                       # Data directories
-│   ├── training/
-│   │   ├── normal/             # Normal behavior videos
-│   │   └── shoplifting/        # Shoplifting behavior videos
-│   ├── videos/                 # Input videos for analysis
-│   └── pos/                    # POS transaction files
+├ data/                       # Data directories
+│   ├ training/
+│   │   ├ normal/             # Normal behavior videos
+│   │   └ shoplifting/        # Shoplifting behavior videos
+│   ├ videos/                 # Input videos for analysis
+│   └ pos/                    # POS transaction files
 │
-├── outputs/                    # Generated outputs
-│   ├── cases/                  # Case files (JSON)
-│   └── clips/                  # Extracted video clips
+├ outputs/                    # Generated outputs
+│   ├ cases/                  # Case files (JSON)
+│   └ clips/                  # Extracted video clips
 │
-└── docs/                       # Documentation
-    └── IMPLEMENTATION_PLAN.md  # Phase 2 implementation details
+└ docs/                       # Documentation
+    └ IMPLEMENTATION_PLAN.md  # Phase 2 implementation details
 ```
 
 ---
 
 ## Model Performance
 
-| Metric | Value |
-|--------|-------|
-| Accuracy | 80.0% |
-| Precision | 80.0% |
-| Recall | 80.0% |
-| F1-Score | 80.0% |
+| Metric      | Value        |
+| ----------- | ------------ |
+| Accuracy    | 80.0%        |
+| Precision   | 80.0%        |
+| Recall      | 80.0%        |
+| F1-Score    | 80.0%        |
 | CV Accuracy | 81.5% ± 1.7% |
 
 ### Top Features by Importance
@@ -338,12 +344,12 @@ The system will operate as a **real-time, blameless decision-support assistant**
 
 ### Real-Time Behavioural Analysis
 
-| Behaviour | Description | Detection Method |
-|-----------|-------------|------------------|
-| **Product Pickup** | Customer picks up item from shelf | Hand-to-shelf pose, arm extension patterns |
-| **Concealment Gestures** | Hand-to-pocket, hand-to-bag movements | Pose trajectory analysis, gesture classification |
-| **Prolonged Holding** | Extended product holding without checkout progression | Time-based tracking with location awareness |
-| **Exit Behaviour** | Movement toward exit without completing transaction | Zone-based tracking, trajectory prediction |
+| Behaviour                | Description                                           | Detection Method                                 |
+| ------------------------ | ----------------------------------------------------- | ------------------------------------------------ |
+| **Product Pickup**       | Customer picks up item from shelf                     | Hand-to-shelf pose, arm extension patterns       |
+| **Concealment Gestures** | Hand-to-pocket, hand-to-bag movements                 | Pose trajectory analysis, gesture classification |
+| **Prolonged Holding**    | Extended product holding without checkout progression | Time-based tracking with location awareness      |
+| **Exit Behaviour**       | Movement toward exit without completing transaction   | Zone-based tracking, trajectory prediction       |
 
 ### Live POS Integration
 
@@ -354,12 +360,12 @@ The system will operate as a **real-time, blameless decision-support assistant**
 
 ### Enhanced Risk Levels & Notifications
 
-| Risk Level | Threshold | Action |
-|------------|-----------|--------|
-| Level 1 (Minimal) | 0.0 - 0.2 | No notification, logged only |
-| Level 2 (Low) | 0.2 - 0.4 | Logged, periodic review |
-| Level 3 (Medium) | 0.4 - 0.6 | Soft alert to operator dashboard |
-| Level 4 (High) | 0.6 - 0.8 | Immediate notification to manager |
+| Risk Level         | Threshold | Action                                  |
+| ------------------ | --------- | --------------------------------------- |
+| Level 1 (Minimal)  | 0.0 - 0.2 | No notification, logged only            |
+| Level 2 (Low)      | 0.2 - 0.4 | Logged, periodic review                 |
+| Level 3 (Medium)   | 0.4 - 0.6 | Soft alert to operator dashboard        |
+| Level 4 (High)     | 0.6 - 0.8 | Immediate notification to manager       |
 | Level 5 (Critical) | 0.8 - 1.0 | Urgent alert with full forensic package |
 
 ### Forensic Package Contents
@@ -374,41 +380,41 @@ When risk thresholds are exceeded, the system attaches a forensic package:
 
 ### Edge Case Handling
 
-| Edge Case | Handling Strategy |
-|-----------|-------------------|
-| **Accidental Missed Scans** | Allow grace period; correlate with customer behaviour at checkout |
-| **Barcode Failures** | Detect repeated scan attempts; do not flag if manual entry follows |
-| **Personal Items Mistaken as Products** | Track item origin; items brought into store vs. picked from shelf |
-| **Children Handling Items** | Detect child-sized poses; require adult association for alerts |
-| **Elderly or Confused Customers** | Slower movement patterns; extended dwell time tolerance |
-| **Items Placed Back Before Checkout** | Track put-back gestures; remove from interaction list |
-| **Multiple Customers Interacting** | Associate interactions with specific pose tracks |
-| **Crowded Scenarios** | Confidence-weighted alerts; avoid false positives |
+| Edge Case                               | Handling Strategy                                                  |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| **Accidental Missed Scans**             | Allow grace period; correlate with customer behaviour at checkout  |
+| **Barcode Failures**                    | Detect repeated scan attempts; do not flag if manual entry follows |
+| **Personal Items Mistaken as Products** | Track item origin; items brought into store vs. picked from shelf  |
+| **Children Handling Items**             | Detect child-sized poses; require adult association for alerts     |
+| **Elderly or Confused Customers**       | Slower movement patterns; extended dwell time tolerance            |
+| **Items Placed Back Before Checkout**   | Track put-back gestures; remove from interaction list              |
+| **Multiple Customers Interacting**      | Associate interactions with specific pose tracks                   |
+| **Crowded Scenarios**                   | Confidence-weighted alerts; avoid false positives                  |
 
 ### Real-Time Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Live Camera   │────▶│  Frame Buffer    │────▶│  Pose Estimator │
+┌─┐     ┌┐     ┌─┐
+│   Live Camera   │▶│  Frame Buffer    │▶│  Pose Estimator │
 │   Feed (RTSP)   │     │  (Ring Buffer)   │     │  (MediaPipe)    │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
+└─┘     └┘     └┬┘
                                                           │
-┌─────────────────┐     ┌──────────────────┐              ▼
-│   POS System    │────▶│  Event Queue     │     ┌─────────────────┐
-│   (Webhook/API) │     │  (Redis/Memory)  │────▶│  Fusion Engine  │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
+┌─┐     ┌┐              ▼
+│   POS System    │▶│  Event Queue     │     ┌─┐
+│   (Webhook/API) │     │  (Redis/Memory)  │▶│  Fusion Engine  │
+└─┘     └┘     └┬┘
                                                           │
-                        ┌──────────────────┐              ▼
-                        │  Alert Manager   │◀────┌─────────────────┐
+                        ┌┐              ▼
+                        │  Alert Manager   │◀┌─┐
                         │  (WebSocket)     │     │  Risk Scorer    │
-                        └────────┬─────────┘     └─────────────────┘
+                        └┬─┘     └─┘
                                  │
-              ┌──────────────────┼──────────────────┐
+              ┌┼┐
               ▼                  ▼                  ▼
-      ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+      ┌┐   ┌┐   ┌┐
       │  Dashboard   │   │  Manager App │   │  Forensic    │
       │  (Streamlit) │   │  (Push/SMS)  │   │  Storage     │
-      └──────────────┘   └──────────────┘   └──────────────┘
+      └┘   └┘   └┘
 ```
 
 ---
@@ -494,13 +500,13 @@ ngrok http 8501
 
 This system is designed with ethical AI principles:
 
-| Principle | Implementation |
-|-----------|----------------|
-| **No Facial Recognition** | Analysis based solely on body pose |
-| **No Identity Tracking** | No personal data stored |
-| **Explainable Decisions** | All scores include reasoning |
-| **Human Oversight** | Alerts are advisory only |
-| **Bias Awareness** | System acknowledges limitations |
+| Principle                 | Implementation                         |
+| ------------------------- | -------------------------------------- |
+| **No Facial Recognition** | Analysis based solely on body pose     |
+| **No Identity Tracking**  | No personal data stored                |
+| **Explainable Decisions** | All scores include reasoning           |
+| **Human Oversight**       | Alerts are advisory only               |
+| **Bias Awareness**        | System acknowledges limitations        |
 | **Vulnerable Protection** | Special handling for children, elderly |
 
 ---
@@ -516,12 +522,14 @@ This system is designed with ethical AI principles:
 ### Phase 2 (Real-Time)
 
 **Hardware:**
+
 - Camera: IP camera with RTSP support (720p minimum, 1080p recommended)
 - Processing: NVIDIA GPU (GTX 1060 or better) for real-time inference
 - Storage: SSD with minimum 500GB for forensic clip retention
 - Network: Gigabit Ethernet for low-latency video streaming
 
 **Software:**
+
 - Python 3.9+
 - MediaPipe for pose estimation
 - OpenCV for video processing
@@ -530,6 +538,7 @@ This system is designed with ethical AI principles:
 - Streamlit for operator dashboard
 
 **Integration:**
+
 - POS System: REST API or webhook endpoint for transaction events
 - Notification: Email, SMS (Twilio), or push notification service
 - Storage: Local filesystem or cloud storage (S3) for forensic packages

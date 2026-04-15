@@ -1,5 +1,5 @@
 """
-behaviour_classifier.py — Loads BiLSTMAttentionClassifier and runs sliding-window
+behaviour_classifier.py - Loads BiLSTMAttentionClassifier and runs sliding-window
                            inference over a sequence of CNN feature vectors.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ class BehaviourClassifier:
             self._model.load_state_dict(sd)
         self._model.eval()
 
-    # ── Full-video inference ──────────────────────────────────────────────────
+    #  Full-video inference 
 
     def classify_sequence(self,
                           features: list[np.ndarray],
@@ -89,7 +89,7 @@ class BehaviourClassifier:
                 ))
         return events
 
-    # ── Rolling live badge inference ──────────────────────────────────────────
+    #  Rolling live badge inference 
 
     def rolling_predict(self, recent_features: list[np.ndarray]) -> tuple[str, float]:
         """
@@ -103,7 +103,7 @@ class BehaviourClassifier:
         conf  = min(float(np.max(probs)), 0.99)
         return label, conf
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    #  Private helpers ─
 
     def _infer(self, seq: np.ndarray) -> np.ndarray:
         """Run one forward pass and return softmax probabilities."""

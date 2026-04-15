@@ -1,7 +1,7 @@
 """
-intent_scorer.py — Computes a composite risk/intent score from detection signals.
+intent_scorer.py - Computes a composite risk/intent score from detection signals.
 
-Pure computation — no I/O, no model calls, no Streamlit.
+Pure computation - no I/O, no model calls, no Streamlit.
 """
 from __future__ import annotations
 import numpy as np

@@ -1,1 +1,1 @@
-# ui package — Streamlit view classes
+# ui package - Streamlit view classes

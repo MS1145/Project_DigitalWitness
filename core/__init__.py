@@ -1,1 +1,1 @@
-# core package — ML models, pipeline, and domain logic
+# core package - ML models, pipeline, and domain logic

@@ -1,5 +1,5 @@
 """
-feature_extractor.py — Loads MobileNetExtractor and converts BGR frames to
+feature_extractor.py - Loads MobileNetExtractor and converts BGR frames to
                         1280-dim numpy feature vectors.
 """
 from __future__ import annotations

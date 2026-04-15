@@ -1,5 +1,5 @@
 """
-ui/components.py — Stateless header and sidebar renderers.
+ui/components.py - Stateless header and sidebar renderers.
 """
 from __future__ import annotations
 import streamlit as st
@@ -27,11 +27,11 @@ def render_sidebar(system_status: dict[str, bool]) -> None:
         using deep learning.
 
         **Pipeline:**
-        1. **YOLO26 Detection** — Jan 2026 model, NMS-free, 43% faster than YOLOv8.
+        1. **YOLO26 Detection** - Jan 2026 model, NMS-free, 43% faster than YOLOv8.
            Identifies and tracks people & products.
-        2. **MobileNetV2 Features** — Extracts 1280-dim spatial features per frame
+        2. **MobileNetV2 Features** - Extracts 1280-dim spatial features per frame
            (fine-tuned backbone, ImageNet pretrained).
-        3. **Bidirectional LSTM + Attention** — Classifies temporal sequences of
+        3. **Bidirectional LSTM + Attention** - Classifies temporal sequences of
            features into normal / shoplifting.
 
         **Important:** This is an *advisory system*. It does **not** determine guilt.
@@ -42,7 +42,7 @@ def render_sidebar(system_status: dict[str, bool]) -> None:
         if system_status.get("all_ready"):
             st.success("All models loaded")
         else:
-            st.warning("Some models missing — check `models/` folder")
+            st.warning("Some models missing - check `models/` folder")
         st.markdown("---")
         st.markdown("### Important Notice")
         st.info(
@@ -51,4 +51,4 @@ def render_sidebar(system_status: dict[str, bool]) -> None:
             "The system does NOT determine guilt."
         )
         st.markdown("---")
-        st.markdown("##### Final Year Project — 2026")
+        st.markdown("##### Final Year Project - 2026")

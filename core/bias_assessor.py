@@ -1,5 +1,5 @@
 """
-bias_assessor.py — Applies fairness adjustments to the raw intent score.
+bias_assessor.py - Applies fairness adjustments to the raw intent score.
 
 Isolated fairness logic so it can be audited and updated independently
 of the main scoring logic.
@@ -13,7 +13,7 @@ class BiasAssessor:
     Produces a BiasReport and an adjusted risk score.
 
     Currently the only bias signal is whether the LSTM checkpoint was found.
-    A missing checkpoint means predictions are random — the score is halved
+    A missing checkpoint means predictions are random - the score is halved
     and the fairness score is reduced to flag unreliable results.
     """
 
@@ -40,7 +40,7 @@ class BiasAssessor:
             fairness      = self._UNTRAINED_FAIRNESS
             adj_score     = intent.score * self._UNTRAINED_SCALE
             flags.append(
-                "LSTM model not trained — results are random, do not act on them"
+                "LSTM model not trained - results are random, do not act on them"
             )
         else:
             fairness  = self._DEFAULT_FAIRNESS

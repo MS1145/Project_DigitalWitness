@@ -1,5 +1,5 @@
 """
-ui/model_performance_view.py — Renders the Model Performance tab.
+ui/model_performance_view.py - Renders the Model Performance tab.
 """
 from __future__ import annotations
 import numpy as np
@@ -36,11 +36,11 @@ class ModelPerformanceView:
         st.markdown("---")
         self._render_architecture_section(bilstm_info or {})
 
-    # ── Private section renderers ─────────────────────────────────────────────
+    #  Private section renderers ─
 
     def _render_mobilenet_metrics(self, mn: dict) -> None:
         mn_m = mn.get("metrics", {})
-        st.markdown("### MobileNetV2 Frame Classifier — Evaluation Results")
+        st.markdown("### MobileNetV2 Frame Classifier - Evaluation Results")
         st.caption(
             f"Evaluated on {mn.get('n_val_samples', 0):,} held-out validation frames "
             "(20% stratified split)"
@@ -64,7 +64,7 @@ class ModelPerformanceView:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     def _render_bilstm_metrics(self, bi: dict) -> None:
-        st.markdown("### BiLSTM + Attention Sequence Classifier — Validation Accuracy")
+        st.markdown("### BiLSTM + Attention Sequence Classifier - Validation Accuracy")
         st.caption("Best validation accuracy recorded during training (frame-sequence level)")
         if bi:
             c1, c2 = st.columns(2)

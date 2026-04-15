@@ -1,5 +1,5 @@
 """
-pipeline.py — AnalysisPipeline orchestrates the full inference sequence.
+pipeline.py - AnalysisPipeline orchestrates the full inference sequence.
 
 Sequence:
   1. Load YOLO via ModelRegistry
@@ -70,7 +70,7 @@ class YOLODetectorWrapper:
 class AnalysisPipeline:
     """
     End-to-end video analysis pipeline.
-    Stateless — a new analysis is started fresh on each call to run().
+    Stateless - a new analysis is started fresh on each call to run().
     """
 
     def __init__(self, registry: ModelRegistry,
@@ -81,7 +81,7 @@ class AnalysisPipeline:
         self._assessor = BiasAssessor()
         self._alerter  = AlertGenerator()
 
-    # ── Public interface ──────────────────────────────────────────────────────
+    #  Public interface 
 
     def run(self,
             video_path:          str,
@@ -128,7 +128,7 @@ class AnalysisPipeline:
         fps_val = iterator.fps
         total_f = iterator.total_frames
 
-        # ── Frame processing loop ─────────────────────────────────────────────
+        #  Frame processing loop ─
         all_feats:             list[np.ndarray] = []
         persons_set:           set              = set()
         max_concurrent:        int              = 0
@@ -227,11 +227,11 @@ class AnalysisPipeline:
         iterator.release()
         duration = frame_num / fps_val
 
-        # ── Early exit: video too short ───────────────────────────────────────
+        #  Early exit: video too short ─
         if not all_feats:
-            _cb(1.0, "Video too short — returning normal.")
+            _cb(1.0, "Video too short - returning normal.")
             return self._early_exit(
-                f"Video too short ({frame_num} frame(s)) — insufficient data for "
+                f"Video too short ({frame_num} frame(s)) - insufficient data for "
                 "temporal classification. Classified as normal.",
                 frame_num, total_f, fps_val, iterator,
             )
@@ -339,7 +339,7 @@ class AnalysisPipeline:
             annotated_video_path = visual_out_path,
         )
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    #  Private helpers ─
 
     @staticmethod
     def _device() -> torch.device:

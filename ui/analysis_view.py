@@ -1,5 +1,5 @@
 """
-ui/analysis_view.py — Renders the video analysis results section.
+ui/analysis_view.py - Renders the video analysis results section.
 
 Shoplifting results split into two tabs:
   - Store Security : Risk Assessment, Detection Statistics, Forensic Evidence
@@ -13,7 +13,6 @@ import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime
 
-from core.config import DEFAULT_PARAMS
 from core.result_types import PipelineResult, BehaviourEvent
 
 
@@ -64,7 +63,7 @@ class AnalysisView:
         verdict       = result.lstm_verdict
         peak_conf_val = result.yolo_signal.peak_conf if result.yolo_signal else 0.0
 
-        # ── Detection banner ──────────────────────────────────────────────────
+        #  Detection banner 
         if verdict and verdict.is_shoplifting:
             self._render_shoplifting_banner(result, peak_conf_val)
         else:
@@ -72,19 +71,19 @@ class AnalysisView:
 
         st.markdown("---")
 
-        # ── Normal path: compact summary only ─────────────────────────────────
+        #  Normal path: compact summary only ─
         if not (verdict and verdict.is_shoplifting):
             self._render_normal_summary(result)
             return
 
-        # ── Shoplifting path: two-tab XAI layout ──────────────────────────────
+        #  Shoplifting path: two-tab XAI layout 
         tab_sec, tab_tech = st.tabs(["Store Security", "Technical Analysis"])
         with tab_sec:
             self._render_store_security_tab(result)
         with tab_tech:
             self._render_technical_tab(result)
 
-    # ── Banner renderers ──────────────────────────────────────────────────────
+    #  Banner renderers 
 
     def _render_shoplifting_banner(self, result: PipelineResult,
                                    peak_conf_val: float) -> None:
@@ -119,7 +118,7 @@ class AnalysisView:
             - Review annotated video below
             - Verify person count ({persons}) matches floor staff observation
             - Cross-check with POS transaction (use POS Audit tab)
-            - Do **not** confront — follow store policy
+            - Do **not** confront - follow store policy
             """)
         with a2:
             alert_id = result.alert.alert_id if result.alert else "No alert generated"
@@ -130,7 +129,7 @@ class AnalysisView:
             - Export forensic clips from the Store Security tab below
             - Log alert ID: {alert_id}
             """)
-        st.warning("**Advisory System** — This is a pattern match, NOT definitive proof. "
+        st.warning("**Advisory System** - This is a pattern match, NOT definitive proof. "
                    "Human review is mandatory before any action is taken.")
 
     def _render_normal_banner(self, peak_conf_val: float) -> None:
@@ -143,7 +142,7 @@ class AnalysisView:
             </p>
         </div>""", unsafe_allow_html=True)
 
-    # ── Normal summary (compact) ──────────────────────────────────────────────
+    #  Normal summary (compact) 
 
     def _render_normal_summary(self, result: PipelineResult) -> None:
         det = result.detection
@@ -152,7 +151,7 @@ class AnalysisView:
         c1.metric("Persons Tracked",   det.persons_tracked if det else 0)
         c2.metric("Products Detected", det.products_detected if det else 0)
         c3.metric("Frames Processed",  det.frames_processed if det else 0)
-        c4.metric("Duration",          f"{vm.duration:.1f}s" if vm else "—")
+        c4.metric("Duration",          f"{vm.duration:.1f}s" if vm else "-")
         st.markdown("---")
         st.markdown("### Video Information")
         c1, c2, c3, c4 = st.columns(4)
@@ -168,14 +167,14 @@ class AnalysisView:
             <p style='margin:0.5rem 0'>Normal shopping behaviour. No immediate concerns.</p>
         </div>""", unsafe_allow_html=True)
 
-    # ── Early exit ────────────────────────────────────────────────────────────
+    #  Early exit 
 
     def _render_early_exit(self, result: PipelineResult) -> None:
         st.markdown('<div class="section-header">Analysis Results</div>',
                     unsafe_allow_html=True)
         st.markdown("""
         <div class='alert-none'>
-            <h2 style='margin:0'>NORMAL — No Suspicious Activity Detected</h2>
+            <h2 style='margin:0'>NORMAL - No Suspicious Activity Detected</h2>
         </div>""", unsafe_allow_html=True)
         st.info(result.early_exit_reason or "Video too short for temporal classification.")
         vm = result.video_metadata
@@ -202,7 +201,7 @@ class AnalysisView:
         <div class='{div_cls}'>
             <h3 style='margin:0'>Risk Level: {sev}</h3>
             <p style='margin:0.5rem 0 0 0'>
-                Score: {score:.2f} — based on peak detection confidence ({peak_c:.1%}).
+                Score: {score:.2f} - based on peak detection confidence ({peak_c:.1%}).
             </p>
         </div>""", unsafe_allow_html=True)
         st.markdown("---")
@@ -220,7 +219,7 @@ class AnalysisView:
         st.markdown("### Forensic Evidence")
         st.caption(
             "Animated clips extracted from the shoplifting window (+ 1 s context). "
-            "Each clip is a distinct moment at least 2 s apart — no duplicates."
+            "Each clip is a distinct moment at least 2 s apart - no duplicates."
         )
         clips = result.suspicious_frames
         if clips:
@@ -250,7 +249,7 @@ class AnalysisView:
             <div class='{_a_cls}'>
                 <h4 style='margin:0'>Alert: {alert.alert_id}</h4>
                 <p style='margin:0.5rem 0'>{alert.message}</p>
-                <p style='margin:0;font-style:italic'>Advisory system — human validation required.</p>
+                <p style='margin:0;font-style:italic'>Advisory system - human validation required.</p>
             </div>""", unsafe_allow_html=True)
         else:
             st.markdown("""
@@ -258,7 +257,7 @@ class AnalysisView:
                 <h4 style='margin:0'>No Alert Generated</h4>
                 <p style='margin:0.5rem 0'>No automated alert was raised for this video.</p>
             </div>""", unsafe_allow_html=True)
-        st.warning("**Advisory System** — This is a pattern match, NOT definitive proof. "
+        st.warning("**Advisory System** - This is a pattern match, NOT definitive proof. "
                    "Human review is mandatory before any action is taken.")
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -268,17 +267,15 @@ class AnalysisView:
     def _render_technical_tab(self, result: PipelineResult) -> None:
         self._render_step1_yolo(result)
         self._render_step2_mobilenet(result)
-        self._render_step3_bilstm(result)
-        self._render_step4_decision(result)
-        self._render_step5_intent(result)
-        self._render_step6_timeline(result)
-        self._render_step7_quality(result)
+        self._render_step3_decision(result)
+        self._render_step4_intent(result)
+        self._render_step5_timeline(result)
 
     def _render_step1_yolo(self, result: PipelineResult) -> None:
         sig    = result.yolo_signal
         det    = result.detection
         moments = result.yolo_shop_moments
-        st.markdown("### Step 1 — YOLO Detection Evidence")
+        st.markdown("### Step 1 - YOLO Detection Evidence")
         st.caption("Primary verdict signal. The peak frame confidence decides the final classification.")
 
         n_high  = sig.shop_segs_above_50pct if sig else 0
@@ -318,7 +315,7 @@ class AnalysisView:
         st.markdown("---")
 
     def _render_step2_mobilenet(self, result: PipelineResult) -> None:
-        st.markdown("### Step 2 — MobileNetV2 Feature Extraction")
+        st.markdown("### Step 2 - MobileNetV2 Feature Extraction")
         st.caption(
             "1280-dim spatial feature vectors are extracted every 4th frame. "
             "These sequences feed into the BiLSTM temporal classifier."
@@ -332,33 +329,7 @@ class AnalysisView:
             c4.metric("FPS",        f"{vm.fps:.1f}")
         st.markdown("---")
 
-    def _render_step3_bilstm(self, result: PipelineResult) -> None:
-        p      = DEFAULT_PARAMS
-        events = result.behaviour_events
-        st.markdown("### Step 3 — BiLSTM Temporal Analysis (Advisory)")
-        st.caption(
-            f"Analysed {p.lstm_seq_len}-frame sliding windows. "
-            "BiLSTM provides temporal context but does **not** affect the final verdict."
-        )
-        total = len(events)
-        if total > 0:
-            shop_count = sum(1 for e in events if e.behavior_type == "shoplifting")
-            st.markdown(
-                f"**BiLSTM windows:** {shop_count} / {total} classified as shoplifting "
-                f"({shop_count / total:.0%}) — advisory only."
-            )
-        if events:
-            counts: dict[str, dict] = {}
-            for e in events:
-                counts.setdefault(e.behavior_type, {"count": 0, "conf_sum": 0.0})
-                counts[e.behavior_type]["count"]    += 1
-                counts[e.behavior_type]["conf_sum"] += e.confidence
-            for bt, d in counts.items():
-                avg_c = d["conf_sum"] / d["count"]
-                st.markdown(f"- **{bt.capitalize()}**: {d['count']} window(s), avg {avg_c:.1%}")
-        st.markdown("---")
-
-    def _render_step4_decision(self, result: PipelineResult) -> None:
+    def _render_step3_decision(self, result: PipelineResult) -> None:
         sig     = result.yolo_signal
         peak_c  = sig.peak_conf if sig else 0.0
         n_high  = sig.shop_segs_above_50pct if sig else 0
@@ -367,28 +338,28 @@ class AnalysisView:
         _n_sec  = len({round(m["time"], 0) for m in moments})
         _spread = "multiple distinct moments" if _n_sec > 1 else "a single moment"
 
-        st.markdown("### Step 4 — Classification Decision")
+        st.markdown("### Step 3 - Classification Decision")
         st.markdown(f"""
 **Decision rule (single peak threshold):**
 - Peak shoplifting confidence **≥ 70%** → 🔴 SHOPLIFTING
 - Peak shoplifting confidence **< 70%** → 🟢 NORMAL
 
-No segment counting, no vote accumulation — only the highest confidence frame decides.
+No segment counting, no vote accumulation - only the highest confidence frame decides.
 
 **Evidence summary:**
 - Peak confidence: **{peak_c:.1%}** → verdict: **SHOPLIFTING**
 - Frames with shoplifting confidence ≥ 50%: **{len(moments)}** {('spread across ' + _spread) if moments else '(none)'}
 - Total 30-frame segments analysed: **{n_segs}** ({n_high} had peak ≥ 50%)
         """)
-        st.warning("Advisory system — pattern match only, NOT definitive proof. "
+        st.warning("Advisory system - pattern match only, NOT definitive proof. "
                    "Human review is mandatory.")
         st.markdown("---")
 
-    def _render_step5_intent(self, result: PipelineResult) -> None:
+    def _render_step4_intent(self, result: PipelineResult) -> None:
         intent = result.intent
         if not intent:
             return
-        st.markdown("### Step 5 — Intent Score")
+        st.markdown("### Step 4 - Intent Score")
         st.caption("Composite risk score derived from peak confidence and sustained detection segments.")
         i_c1, i_c2 = st.columns([1, 2])
         with i_c1:
@@ -418,17 +389,14 @@ No segment counting, no vote accumulation — only the highest confidence frame 
             st.info(intent.explanation)
         st.markdown("---")
 
-    def _render_step6_timeline(self, result: PipelineResult) -> None:
-        st.markdown("### Step 6 — Behaviour Timeline")
-        st.caption("YOLO 30-frame segments (top row) vs BiLSTM window predictions (bottom row).")
+    def _render_step5_timeline(self, result: PipelineResult) -> None:
+        st.markdown("### Step 5 - Behaviour Timeline")
+        st.caption("YOLO 30-frame segments showing detected behaviour classes over time.")
 
         yolo_segs = result.yolo_segments
-        lstm_evts = result.behaviour_events
-        has_yolo  = bool(yolo_segs)
-        has_lstm  = bool(lstm_evts)
 
-        if not has_yolo and not has_lstm:
-            st.info("No behaviour events detected.")
+        if not yolo_segs:
+            st.info("No behaviour segments detected.")
             st.markdown("---")
             return
 
@@ -451,118 +419,45 @@ No segment counting, no vote accumulation — only the highest confidence frame 
                 showlegend=show_leg,
                 legendgroup=_cls,
                 hovertemplate=(
-                    f"<b>YOLO: {_cls}</b><br>"
+                    f"<b>{_cls}</b><br>"
                     f"Time: {seg.start_time:.1f}s – {seg.end_time:.1f}s<br>"
                     f"Avg conf: {seg.confidence:.1%}<extra></extra>"
                 ),
             ))
 
-        for ev in lstm_evts:
-            _cls     = ev.behavior_type
-            col      = _CLASS_COLOURS.get(_cls, "#667eea")
-            show_leg = _cls not in seen_labels
-            if show_leg:
-                seen_labels.add(_cls)
-            fig.add_trace(go.Bar(
-                x=[ev.end_time - ev.start_time],
-                y=["LSTM Windows"],
-                base=[ev.start_time],
-                orientation="h",
-                marker_color=col,
-                name=_cls,
-                showlegend=show_leg,
-                legendgroup=_cls,
-                hovertemplate=(
-                    f"<b>LSTM: {_cls}</b><br>"
-                    f"Time: {ev.start_time:.1f}s – {ev.end_time:.1f}s<br>"
-                    f"Conf: {ev.confidence:.1%}<extra></extra>"
-                ),
-            ))
-
         fig.update_layout(
             barmode="overlay",
-            title="Behaviour Over Time — YOLO (per 30 frames) + LSTM (windows)",
-            xaxis_title="Time (seconds)",
-            yaxis=dict(categoryorder="array",
-                       categoryarray=["LSTM Windows", "YOLO Frames"]),
-            height=220,
+            title="",
+            xaxis=dict(
+                title="Time (seconds)",
+                range=[0, max((s.end_time for s in yolo_segs), default=60.0) * 1.02],
+            ),
+            yaxis=dict(showticklabels=False),
+            height=160,
             margin=dict(l=20, r=20, t=50, b=20),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         )
+        
         st.plotly_chart(fig, use_container_width=True)
+        yolo_counts = Counter(s.dominant_class for s in yolo_segs)
+        total_segs  = len(yolo_segs)
+        st.markdown("**Class distribution across 30-frame segments:**")
+        cols = st.columns(len(yolo_counts))
+        for ci, (_cls, cnt) in enumerate(sorted(
+                yolo_counts.items(), key=lambda x: self._yolo_priority(x[0]))):
+            cols[ci].metric(_cls, f"{cnt} seg", f"{cnt / total_segs:.0%}")
 
-        if has_yolo:
-            yolo_counts = Counter(s.dominant_class for s in yolo_segs)
-            total_segs  = len(yolo_segs)
-            st.markdown("**YOLO class distribution across 30-frame segments:**")
-            cols = st.columns(len(yolo_counts))
-            for ci, (_cls, cnt) in enumerate(sorted(
-                    yolo_counts.items(), key=lambda x: self._yolo_priority(x[0]))):
-                cols[ci].metric(_cls, f"{cnt} seg", f"{cnt / total_segs:.0%}")
-
-        with st.expander("View Detailed Behaviour Events"):
-            if has_lstm:
-                st.markdown("**LSTM Windows**")
-                rows = [{"Behaviour" : e.behavior_type.capitalize(),
-                         "Start"     : f"{e.start_time:.1f}s",
-                         "End"       : f"{e.end_time:.1f}s",
-                         "Confidence": f"{e.confidence:.1%}"}
-                        for e in lstm_evts]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-            if has_yolo:
-                st.markdown("**YOLO Segments (30-frame blocks)**")
-                yrows = [{"Class"   : s.dominant_class,
-                          "Start"   : f"{s.start_time:.1f}s",
-                          "End"     : f"{s.end_time:.1f}s",
-                          "Avg Conf": f"{s.confidence:.1%}"}
-                         for s in yolo_segs]
-                st.dataframe(pd.DataFrame(yrows), use_container_width=True, hide_index=True)
+        with st.expander("View YOLO Segment Detail"):
+            yrows = [{"Class"   : s.dominant_class,
+                      "Start"   : f"{s.start_time:.1f}s",
+                      "End"     : f"{s.end_time:.1f}s",
+                      "Avg Conf": f"{s.confidence:.1%}",
+                      "Peak Shop Conf": f"{s.max_shop_conf:.1%}"}
+                     for s in yolo_segs]
+            st.dataframe(pd.DataFrame(yrows), use_container_width=True, hide_index=True)
         st.markdown("---")
 
-    def _render_step7_quality(self, result: PipelineResult) -> None:
-        st.markdown("### Step 7 — Video Quality & Bias Assessment")
-        st.caption("Quality affects result reliability. Bias indicators require additional scrutiny.")
-        q_c1, q_c2 = st.columns(2)
-        with q_c1:
-            st.markdown("**Video Quality**")
-            rel = result.quality.reliability_score if result.quality else 0.0
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number", value=rel * 100,
-                title={"text": "Reliability Score"},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#38ef7d"},
-                       "steps": [{"range": [0, 50],  "color": "#ffcccc"},
-                                  {"range": [50, 75], "color": "#fff3cd"},
-                                  {"range": [75, 100],"color": "#d4edda"}]}
-            ))
-            fig.update_layout(height=200, margin=dict(l=20, r=20, t=50, b=20))
-            st.plotly_chart(fig, use_container_width=True)
-        with q_c2:
-            st.markdown("**Bias & Fairness**")
-            f_score = result.bias.overall_fairness_score if result.bias else 0.0
-            fig     = go.Figure(go.Indicator(
-                mode="gauge+number", value=f_score * 100,
-                title={"text": "Fairness Score"},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#667eea"},
-                       "steps": [{"range": [0, 50],  "color": "#ffcccc"},
-                                  {"range": [50, 75], "color": "#fff3cd"},
-                                  {"range": [75, 100],"color": "#d4edda"}]}
-            ))
-            fig.update_layout(height=200, margin=dict(l=20, r=20, t=50, b=20))
-            st.plotly_chart(fig, use_container_width=True)
-
-        if result.bias:
-            with st.expander("Bias Assessment Details"):
-                bias = result.bias
-                st.markdown(f"- **Fairness Score:** {bias.overall_fairness_score:.1%}")
-                st.markdown(f"- **Analysis Reliable:** {'Yes' if bias.analysis_reliable else 'No'}")
-                st.markdown(f"- **Manual Review Required:** {'Yes' if bias.requires_review else 'No'}")
-                for flag in bias.flags:
-                    st.warning(flag)
-                st.info("All alerts require human validation before any action is taken.")
-                if bias.requires_review:
-                    st.error("**MANUAL REVIEW REQUIRED** — Bias indicators warrant additional scrutiny.")
-
-    # ── Static helpers ────────────────────────────────────────────────────────
+    #  Static helpers 
 
     @staticmethod
     def _yolo_priority(cls: str) -> int:
