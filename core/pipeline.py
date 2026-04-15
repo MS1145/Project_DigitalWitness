@@ -63,6 +63,7 @@ class YOLODetectorWrapper:
         return self._model.track(
             frame, conf=self._conf, iou=self._iou,
             persist=persist, verbose=False,
+            tracker="bytetrack.yaml",
             imgsz=320, device=self._device, half=self._half,
         )[0]
 

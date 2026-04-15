@@ -28,7 +28,6 @@ from core.result_types import PipelineResult
 from ui.styles import CSS_BLOCK
 from ui.components import render_header, render_sidebar
 from ui.analysis_view import AnalysisView
-from ui.model_performance_view import ModelPerformanceView
 from ui.pos_audit_view import PosAuditView
 
 
@@ -48,7 +47,6 @@ class DigitalWitnessApp:
         self._pipeline = AnalysisPipeline(self._registry, DEFAULT_PARAMS)
         self._clip_extractor = ClipExtractor()
         self._analysis_view = AnalysisView()
-        self._perf_view = ModelPerformanceView(self._registry)
         self._pos_view = PosAuditView()
 
     #  Public entry point 
@@ -76,15 +74,9 @@ class DigitalWitnessApp:
     #  Tab layout 
 
     def _render_tabs(self) -> None:
-        tab_video, tab_perf, tab_pos = st.tabs([
-            "Video Analysis",
-            "Model Performance",
-            "POS Audit",
-        ])
+        tab_video, tab_pos = st.tabs(["Video Analysis", "POS Audit"])
         with tab_video:
             self._render_video_tab()
-        with tab_perf:
-            self._perf_view.render()
         with tab_pos:
             self._pos_view.render(st.session_state.analysis_result)
 
