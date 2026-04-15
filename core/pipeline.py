@@ -321,7 +321,7 @@ class AnalysisPipeline:
             height      = iterator._height,
             frame_count = total_f,
         )
-        _cb(1.0, "Complete!")
+        _cb(1.0, "Loading...")
         return PipelineResult(
             success              = True,
             video_metadata       = vm,
