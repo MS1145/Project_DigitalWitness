@@ -1,8 +1,18 @@
 """
-result_types.py - Typed value objects that cross the pipeline → UI boundary.
+result_types.py - Typed value objects that cross the pipeline -> UI boundary.
 
-All dataclasses are immutable (frozen=True) except PipelineResult, which
-needs suspicious_frames appended after the pipeline completes.
+All dataclasses are immutable (frozen=True) except PipelineResult and
+BehaviourEvent which need to be mutable after construction.
+
+Why dataclasses instead of dicts? Using typed objects means the IDE can
+catch typos and missing fields at write-time rather than crashing at runtime.
+It also makes the pipeline output self-documenting - you can read this file
+and know exactly what the UI receives.
+
+Python dataclasses were introduced in PEP 557:
+    Van Rossum, G. et al. PEP 557 - Data Classes.
+    https://peps.python.org/pep-0557/
+    Python 3.7+, Python Software Foundation.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -21,15 +31,23 @@ class VideoMetadata:
 
 @dataclass(frozen=True)
 class LstmVerdict:
-    """Final classification decision produced by the YOLO peak-threshold rule."""
-    classification: str   # "normal" | "shoplifting"
+    """Final classification decision produced by the YOLO peak-threshold rule.
+
+    Despite the name 'lstm_verdict' this is actually determined by YOLO peak
+    confidence now. The name is kept for backwards compatibility with the UI.
+    """
+    classification: str    # "normal" | "shoplifting"
     confidence:     float
     is_shoplifting: bool
 
 
 @dataclass
 class BehaviourEvent:
-    """One BiLSTM sliding-window prediction."""
+    """One BiLSTM sliding-window prediction.
+
+    Not frozen because the clip extractor sometimes mutates events when
+    building the fallback from YOLO segments.
+    """
     behavior_type: str
     start_time:    float
     end_time:      float
@@ -39,12 +57,17 @@ class BehaviourEvent:
 
 @dataclass(frozen=True)
 class YoloSegment:
-    """Dominant YOLO class for a 30-frame segment."""
+    """Dominant YOLO class for a 30-frame segment.
+
+    max_shop_conf is tracked separately from confidence because confidence
+    is the average across all frames in the segment, while max_shop_conf
+    is the peak - useful for the clip extraction fallback threshold.
+    """
     start_time:     float
     end_time:       float
     dominant_class: str
-    confidence:     float          # average across the segment
-    max_shop_conf:  float          # peak shoplifting confidence in this segment
+    confidence:     float   # average across the segment
+    max_shop_conf:  float   # peak shoplifting confidence in this segment
 
 
 @dataclass(frozen=True)
@@ -100,7 +123,9 @@ class AlertRecord:
 class PipelineResult:
     """
     Complete output of AnalysisPipeline.run().
-    suspicious_frames is populated post-pipeline by ClipExtractor.
+
+    Not frozen because suspicious_frames is populated post-pipeline by
+    ClipExtractor in app.py after the temp video file is still available.
     """
     success:              bool
     error:                str | None              = None

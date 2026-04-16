@@ -1,6 +1,10 @@
 """
 behaviour_classifier.py - Loads BiLSTMAttentionClassifier and runs sliding-window
-                           inference over a sequence of CNN feature vectors.
+                          inference over a sequence of CNN feature vectors.
+
+Sliding window approach: instead of classifying one giant sequence we take
+overlapping windows of 45 features (stride 15) and classify each one. This
+gives us a timeline of predictions rather than a single label for the whole video.
 """
 from __future__ import annotations
 import numpy as np
@@ -21,7 +25,12 @@ class BehaviourClassifier:
         rolling single-window inference for the live badge
     """
 
-    TEMPERATURE = 3.0   # flatten overconfident softmax distributions
+    # Temperature scaling divides logits before softmax to soften the
+    # probability distribution. Without this the model is overconfident
+    # (outputs 99% for one class even when it's not sure).
+    # Based on: Guo, C. et al. (2017). On Calibration of Modern Neural Networks.
+    # ICML 2017. https://arxiv.org/abs/1706.04599
+    TEMPERATURE = 3.0
 
     def __init__(self, checkpoint_path: Path,
                  device: torch.device,
@@ -38,7 +47,7 @@ class BehaviourClassifier:
             self._model.load_state_dict(sd)
         self._model.eval()
 
-    #  Full-video inference 
+    # full video inference
     def classify_sequence(self,
                           features: list[np.ndarray],
                           video_duration: float,
@@ -59,7 +68,8 @@ class BehaviourClassifier:
         events    = []
 
         if len(features) < p.lstm_seq_len:
-            # Pad short video and run single inference
+            # video is too short to fill a full window so we pad with zeros
+            # and scale confidence down proportionally - short clips are less reliable
             pad    = np.zeros((p.lstm_seq_len - len(features), p.mobilenet_dim))
             seq    = np.vstack([feats_arr, pad])
             probs  = self._infer(seq)
@@ -73,6 +83,8 @@ class BehaviourClassifier:
                                  zip(p.behavior_classes, probs)},
             ))
         else:
+            # slide the window across the full feature sequence
+            # seq_len=45, stride=15 means consecutive windows overlap by 30 features
             for start in range(0,
                                len(features) - p.lstm_seq_len + 1,
                                p.lstm_stride):
@@ -88,7 +100,7 @@ class BehaviourClassifier:
                 ))
         return events
 
-    #  Rolling live badge inference 
+    # live badge - runs during frame iteration, not post-processing
     def rolling_predict(self, recent_features: list[np.ndarray]) -> tuple[str, float]:
         """
         Single forward pass over the last lstm_seq_len features.
@@ -101,12 +113,12 @@ class BehaviourClassifier:
         conf  = min(float(np.max(probs)), 0.99)
         return label, conf
 
-    #  Private helpers
     def _infer(self, seq: np.ndarray) -> np.ndarray:
         """Run one forward pass and return softmax probabilities."""
         x_t = torch.FloatTensor(seq[np.newaxis]).to(self._device)
         with torch.no_grad():
             logits, _ = self._model(x_t)
+            # divide by TEMPERATURE before softmax to reduce overconfidence
             probs     = torch.softmax(logits / self.TEMPERATURE,
                                       dim=1).cpu().numpy()[0]
         return probs

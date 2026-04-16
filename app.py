@@ -2,11 +2,20 @@
 app.py - Digital Witness entry point.
 
 session state, tab layout, pipeline dispatch.
-All ML logic lives in core folder and all rendering logic lives in ui folder
+All ML logic lives in core/ and all rendering logic lives in ui/.
+
+Streamlit is the web framework used for the entire front-end:
+    Streamlit Inc. (2019). Streamlit - The fastest way to build data apps.
+    https://streamlit.io
+    Apache 2.0 License.
+
+IMPORTANT: st.set_page_config() must be the very first Streamlit call in
+the script. Streamlit throws an error if any other st.* call comes before it.
+This is a known Streamlit constraint - do not reorder the imports below.
 """
 import streamlit as st
 
-#  Page config MUST be the very first Streamlit call 
+# page config MUST be the very first Streamlit call
 st.set_page_config(
     page_title="Digital Witness - Retail Security Assistant",
     page_icon=None,
@@ -14,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-#  Remaining imports (after set_page_config) 
+# remaining imports (after set_page_config)
 import tempfile
 import os
 from pathlib import Path
@@ -32,24 +41,15 @@ from ui.pos_audit_view import PosAuditView
 
 
 class DigitalWitnessApp:
-    """
-    Top-level application class.
-
-    Responsibilities:
-    - Inject CSS once.
-    - Initialise session state on first run.
-    - Render header, sidebar and the three-tab layout.
-    - Dispatch video upload pipeline analysis view.
-    """
 
     def __init__(self) -> None:
-        self._registry = ModelRegistry(DEFAULT_PATHS)
-        self._pipeline = AnalysisPipeline(self._registry, DEFAULT_PARAMS)
+        self._registry     = ModelRegistry(DEFAULT_PATHS)
+        self._pipeline     = AnalysisPipeline(self._registry, DEFAULT_PARAMS)
         self._clip_extractor = ClipExtractor()
-        self._analysis_view = AnalysisView()
-        self._pos_view = PosAuditView()
+        self._analysis_view  = AnalysisView()
+        self._pos_view       = PosAuditView()
 
-    #  Public entry point 
+    # public entry point
     def run(self) -> None:
         st.markdown(CSS_BLOCK, unsafe_allow_html=True)
         self._init_session_state()
@@ -58,18 +58,19 @@ class DigitalWitnessApp:
         self._render_tabs()
         self._render_footer()
 
-    #  Session state ─
+    # session state
     def _init_session_state(self) -> None:
+        # only initialise keys that don't exist yet - this preserves values across reruns
         defaults = {
-            "analysis_result": None,
-            "pos_items": [],
+            "analysis_result"   : None,
+            "pos_items"         : [],
             "last_uploaded_name": None,
         }
         for key, value in defaults.items():
             if key not in st.session_state:
                 st.session_state[key] = value
 
-    #  Tab layout 
+    # tab layout
     def _render_tabs(self) -> None:
         tab_video, tab_pos = st.tabs(["Video Analysis", "POS Audit"])
         with tab_video:
@@ -77,7 +78,7 @@ class DigitalWitnessApp:
         with tab_pos:
             self._pos_view.render(st.session_state.analysis_result)
 
-    #  Video Analysis tab 
+    # video analysis tab
     def _render_video_tab(self) -> None:
         st.markdown(
             '<div class="section-header">Video Analysis</div>',
@@ -100,10 +101,11 @@ class DigitalWitnessApp:
             help="Supported: MP4, AVI, MOV, MKV",
         )
 
-        # Clear stale result when a new file is uploaded
+        # clear stale result when a new file is uploaded so we don't show
+        # last video's results under the new video
         if uploaded is not None:
             if st.session_state.last_uploaded_name != uploaded.name:
-                st.session_state.analysis_result = None
+                st.session_state.analysis_result  = None
                 st.session_state.last_uploaded_name = uploaded.name
 
         col_btn, col_clear = st.columns([1, 5])
@@ -111,7 +113,7 @@ class DigitalWitnessApp:
             run_btn = st.button("Analyse Video", use_container_width=True)
         with col_clear:
             if st.button("Clear Results", key="clear_results"):
-                st.session_state.analysis_result = None
+                st.session_state.analysis_result   = None
                 st.session_state.last_uploaded_name = None
                 st.rerun()
 
@@ -123,10 +125,11 @@ class DigitalWitnessApp:
         if st.session_state.analysis_result is not None:
             self._render_analysis_output()
 
-    #  Pipeline dispatch
+    # pipeline dispatch
     def _run_analysis(self, uploaded) -> None:
         import uuid
-        suffix     = Path(uploaded.name).suffix or ".mp4"
+        suffix = Path(uploaded.name).suffix or ".mp4"
+        # write the uploaded file to a temp path so OpenCV can open it
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(uploaded.read())
             tmp_path = tmp.name
@@ -135,7 +138,8 @@ class DigitalWitnessApp:
             f"dw_annotated_{uuid.uuid4().hex[:8]}.mp4",
         )
 
-        #  Live preview layout (created once; only placeholders updated) 
+        # live preview layout (columns created once; only st.empty() placeholders update per-frame)
+        # creating columns inside the callback would rebuild the layout every frame and flicker
         st.markdown("### Live Analysis Preview")
         st.caption(
             "Watch the pipeline analyse your video - YOLO detections with "
@@ -147,7 +151,7 @@ class DigitalWitnessApp:
             _frame_ph.markdown(
                 "<div style='height:200px;display:flex;align-items:center;"
                 "justify-content:center;background:#111;border-radius:8px;"
-                "color:#666;font-size:0.9rem;'>Waiting for first frame…</div>",
+                "color:#666;font-size:0.9rem;'>Waiting for first frame...</div>",
                 unsafe_allow_html=True,
             )
         with _col_stats:
@@ -162,20 +166,21 @@ class DigitalWitnessApp:
             _status.text(msg)
 
         def on_live_frame(frame_rgb, frame_num: int, total: int, stats: dict) -> None:
-            #  Annotated frame ─
+            # left panel - annotated video frame
             _frame_ph.image(
                 frame_rgb,
                 caption=f"Frame {frame_num} / {total}",
                 use_container_width=True,
             )
 
-            #  Dark stats panel 
+            # right panel - dark stats panel with current classification
             label    = stats.get("label", "Analyzing...")
             conf     = stats.get("conf", 0.0)
             persons  = stats.get("persons_tracked", 0)
             products = stats.get("products_detected", 0)
-            col      = ("#dc3545" if label == "shoplifting" else
-                        "#28a745" if label == "normal" else "#aaaaaa")
+            # colour the label based on verdict - red for shoplifting, green for normal
+            col = ("#dc3545" if label == "shoplifting" else
+                   "#28a745" if label == "normal" else "#aaaaaa")
             _stat_ph.markdown(f"""
             <div style='padding:1rem;background:#1a1a2e;border-radius:8px;
                         border:1px solid #333;font-family:monospace;'>
@@ -195,7 +200,7 @@ class DigitalWitnessApp:
                     {products}</p>
             </div>""", unsafe_allow_html=True)
 
-            #  Colour timeline bar ─
+            # bottom - colour timeline bar showing where we are in the video
             timeline = stats.get("timeline", [])
             if timeline:
                 pct  = frame_num / max(total, 1)
@@ -211,9 +216,9 @@ class DigitalWitnessApp:
                 <div style='margin:0.4rem 0 0.8rem 0;'>
                     <p style='color:#888;font-size:0.72rem;margin-bottom:4px;'>
                         Timeline &nbsp;
-                        <span style='color:#28a745;'>■ Normal</span>&nbsp;
-                        <span style='color:#dc3545;'>■ Suspicious</span>&nbsp;
-                        <span style='color:#555;'>■ Analyzing</span>
+                        <span style='color:#28a745;'>Normal</span>&nbsp;
+                        <span style='color:#dc3545;'>Suspicious</span>&nbsp;
+                        <span style='color:#555;'>Analyzing</span>
                     </p>
                     {bar}
                     <p style='color:#666;font-size:0.72rem;margin-top:4px;'>
@@ -227,16 +232,22 @@ class DigitalWitnessApp:
                 visual_out_path=visual_out,
                 live_frame_callback=on_live_frame,
             )
-            # Extract forensic clips while the temp file still exists
+
+            # extract forensic GIF clips while the temp file still exists
+            # two-stage approach:
+            # 1. try LSTM suspicious events first (most precise timestamps)
+            # 2. fall back to YOLO segments when LSTM outputs all-normal
+            #    (common when the model is undertrained)
             if result.success and not result.early_exit:
                 _SUSP = {"shoplifting", "Looking around", "concealment", "bypass"}
-                # Prefer LSTM shoplifting/suspicious events
+
                 clip_events = [
                     e for e in (result.behaviour_events or [])
                     if e.behavior_type in _SUSP
                 ]
-                # Fallback YOLO segments - most common path when LSTM model
-                # outputs all-normal but YOLO peak triggered the shoplifting verdict
+
+                # fallback: use YOLO segments as clip sources
+                # this fires when LSTM gives all-normal but YOLO peak triggered shoplifting
                 if not clip_events and result.yolo_segments:
                     from core.result_types import BehaviourEvent
                     clip_events = [
@@ -250,12 +261,16 @@ class DigitalWitnessApp:
                         for s in result.yolo_segments
                         if s.dominant_class in _SUSP or s.max_shop_conf >= 0.30
                     ]
+
                 if clip_events:
                     result.suspicious_frames = self._clip_extractor.extract(
                         tmp_path, clip_events
                     )
+
             st.session_state.analysis_result = result
         finally:
+            # always clear the live preview placeholders after the run
+            # and delete the temp file even if the pipeline threw an exception
             _frame_ph.empty()
             _stat_ph.empty()
             _timeline_ph.empty()
@@ -266,7 +281,7 @@ class DigitalWitnessApp:
             except OSError:
                 pass
 
-    #  Analysis output 
+    # analysis output
     def _render_analysis_output(self) -> None:
         result: PipelineResult = st.session_state.analysis_result
         if result is None:
@@ -276,7 +291,7 @@ class DigitalWitnessApp:
             return
         self._analysis_view.render(result)
 
-    #  Footer 
+    # footer
     def _render_footer(self) -> None:
         st.markdown("---")
         st.markdown(
@@ -288,9 +303,8 @@ class DigitalWitnessApp:
         )
 
 
-#  Entry point 
+# Streamlit runs this module directly (not via __main__) so both paths call run()
 if __name__ == "__main__":
     DigitalWitnessApp().run()
 else:
-    # Streamlit executes the module directly (not __main__)
     DigitalWitnessApp().run()

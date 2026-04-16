@@ -3,6 +3,16 @@ video_processor.py - OpenCV video I/O, YOLO detection/tracking, and frame annota
 
 VideoFrameIterator handles all frame-level YOLO operations so the pipeline
 can focus on feature extraction and classification.
+
+OpenCV is used for all video reading, frame resizing, and bounding box drawing.
+    OpenCV: Bradski, G. (2000). The OpenCV Library. Dr. Dobb's Journal.
+    https://opencv.org
+
+ByteTrack is used for multi-object tracking (configured in pipeline.py via
+bytetrack.yaml). Track IDs are used here to count unique persons and detect
+person-product proximity interactions.
+    ByteTrack: Zhang, Y. et al. (2022). ByteTrack: Multi-Object Tracking by
+    Associating Every Detection Box. ECCV 2022. https://arxiv.org/abs/2110.06864
 """
 from __future__ import annotations
 import cv2
@@ -24,15 +34,18 @@ class FrameDetections:
     yolo_conf:     float = 0.0
 
 
-# Colour map for bounding-box annotation
+# BGR colour map for bounding box annotation on the video frame
+# colours chosen to be distinguishable on typical CCTV footage
 _BOX_COLOURS = {
-    "shoplifting"    : (0, 0, 220),
-    "Looking around" : (0, 140, 255),
-    "Picking-Holding": (0, 200, 255),
-    "normal"         : (0, 200, 0),
+    "shoplifting"    : (0, 0, 220),     # red - most suspicious
+    "Looking around" : (0, 140, 255),   # orange
+    "Picking-Holding": (0, 200, 255),   # yellow
+    "normal"         : (0, 200, 0),     # green
 }
 
-# COCO product classes treated as "product interactions"
+# COCO class names we treat as product interactions when using the base YOLO model
+# the 4-class model has its own "Picking-Holding" class so this list is only
+# used as a fallback when yolo26n.pt (COCO) is the only available model
 _COCO_PRODUCT_CLASSES = frozenset({
     "bottle", "cup", "bowl", "banana", "apple", "sandwich",
     "backpack", "handbag", "book", "cell phone", "orange",
@@ -53,14 +66,14 @@ class VideoFrameIterator:
         for frame, detections, frame_num in iterator:
             ...
         iterator.release()
-        meta= iterator.metadata
-        segments= iterator.build_yolo_segments(fps)
+        meta     = iterator.metadata
+        segments = iterator.build_yolo_segments(fps)
     """
 
     BEHAVIOUR_4CLS = frozenset({"Looking around", "Picking-Holding", "normal", "shoplifting"})
     SUSPICIOUS_CLS = frozenset({"Looking around", "shoplifting"})
     PRODUCT_CLS    = frozenset({"Picking-Holding"})
-    PRIORITY       = {"shoplifting": 3, "Looking around": 2, "Picking-Holding": 1, "normal": 0}
+    PRIORITY = {"shoplifting": 3, "Looking around": 2, "Picking-Holding": 1, "normal": 0}
 
     def __init__(self, video_path: str, yolo_detector,
                  params: PipelineParams = DEFAULT_PARAMS,
@@ -70,16 +83,18 @@ class VideoFrameIterator:
         self._params      = params
         self._cap         = cv2.VideoCapture(video_path)
         self._writer      = None
-        self._frame_labels: list[tuple[int, str, float]] = []   # (frame_num, label, conf)
+        self._frame_labels: list[tuple[int, str, float]] = []  # (frame_num, label, conf)
 
         if not self._cap.isOpened():
             raise IOError(f"Cannot open video: {video_path}")
 
-        self._fps             = self._cap.get(cv2.CAP_PROP_FPS) or 30.0
-        self._total           = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self._width           = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self._height          = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self._last_yolo_result = None   # updated each time YOLO runs; readable by pipeline
+        self._fps    = self._cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self._total  = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._width  = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self._height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # this gets set every time YOLO runs so the pipeline can pass the real
+        # result to annotate_and_write instead of a dummy placeholder
+        self._last_yolo_result = None
 
         if visual_out_path:
             fourcc       = cv2.VideoWriter_fourcc(*"mp4v")
@@ -87,7 +102,7 @@ class VideoFrameIterator:
                 visual_out_path, fourcc, self._fps, (self._width, self._height)
             )
 
-    #  Iterator protocol ─
+    # iterator protocol
 
     def __iter__(self):
         last_yolo_result = None
@@ -99,10 +114,11 @@ class VideoFrameIterator:
                 break
             frame_num += 1
 
-            # Run YOLO every yolo_step frames; reuse otherwise
+            # run YOLO every yolo_step frames and reuse the last result in between
+            # this roughly halves the YOLO runtime at the cost of slightly stale boxes
             if frame_num % self._params.yolo_step == 1 or last_yolo_result is None:
                 last_yolo_result       = self._detector.track(frame)
-                self._last_yolo_result = last_yolo_result   # expose to pipeline
+                self._last_yolo_result = last_yolo_result  # expose so pipeline can annotate
 
             detections = self._parse_detections(last_yolo_result, frame_num)
             yield frame, detections, frame_num
@@ -113,7 +129,9 @@ class VideoFrameIterator:
                            yolo_result) -> np.ndarray:
         """
         Draw bounding boxes on a copy of frame and optionally write to MP4.
-        Returns the annotated frame (RGB-ready for st.image).
+        Returns the annotated BGR frame.
+
+        Box colours follow _BOX_COLOURS above. Labels include class name and confidence.
         """
         ann = frame.copy()
         if yolo_result is not None and yolo_result.boxes is not None:
@@ -125,12 +143,14 @@ class VideoFrameIterator:
                 cn_v = self._detector.names[int(cls_id_v)]
                 col_v, lbl_v = self._box_style(cn_v, conf_v)
                 cv2.rectangle(ann, (x1, y1), (x2, y2), col_v, 2)
+                # draw a filled rectangle behind the label so it's readable on any background
                 (tw, th), _ = cv2.getTextSize(lbl_v, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                 lbl_y = max(y1 - 4, th + 6)
                 cv2.rectangle(ann, (x1, lbl_y - th - 6),
                               (x1 + tw + 8, lbl_y + 2), col_v, -1)
                 cv2.putText(ann, lbl_v, (x1 + 4, lbl_y - 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+        # frame counter in the bottom-left corner
         cv2.putText(ann, f"{frame_num}/{self._total}",
                     (8, ann.shape[0] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
@@ -138,13 +158,17 @@ class VideoFrameIterator:
             self._writer.write(ann)
         return ann
 
-    #  Segment timeline builder 
+    # segment timeline builder
 
     def build_yolo_segments(self, duration: float) -> list[YoloSegment]:
-        """Aggregate per-frame YOLO labels into 30-frame timeline segments."""
+        """Aggregate per-frame YOLO labels into 30-frame timeline segments.
+
+        Each segment gets the highest-priority class that appeared in that block.
+        This smooths out single-frame noise and gives a cleaner timeline.
+        """
         if not self._frame_labels:
             return []
-        SEG = 30
+        SEG = 30  # frames per segment
         seg_map: dict[int, list] = defaultdict(list)
         for fn, lbl, conf in self._frame_labels:
             seg_map[fn // SEG].append((lbl, conf))
@@ -164,20 +188,20 @@ class VideoFrameIterator:
             ))
         return segments
 
-    #  Resource management ─
+    # resource management
 
     def release(self) -> None:
         if self._writer:
             self._writer.release()
         self._cap.release()
 
-    #  Properties ─
+    # properties
 
     @property
     def metadata(self) -> VideoMetadata:
         return VideoMetadata(
             filename    = Path(self._video_path).name,
-            duration    = 0.0,   # caller fills in final duration after frame count
+            duration    = 0.0,   # caller fills in actual duration after the loop ends
             fps         = self._fps,
             width       = self._width,
             height      = self._height,
@@ -196,7 +220,7 @@ class VideoFrameIterator:
     def frame_labels(self) -> list[tuple[int, str, float]]:
         return self._frame_labels
 
-    #  Private helpers ─
+    # private helpers
 
     def _parse_detections(self, yolo_result, frame_num: int) -> FrameDetections:
         """Parse a raw YOLO result into a FrameDetections object."""
@@ -213,6 +237,7 @@ class VideoFrameIterator:
             cls_name = self._detector.names[int(cls_id)]
 
             if self._detector.is_4cls:
+                # 4-class model: Looking around / Picking-Holding / normal / shoplifting
                 if cls_name not in self.BEHAVIOUR_4CLS:
                     continue
                 tid = (real_ids[i] if real_ids is not None else -(i + 1))
@@ -220,6 +245,7 @@ class VideoFrameIterator:
                 if cls_name in self.PRODUCT_CLS:
                     det.product_boxes.append((cls_name, box_t))
             else:
+                # COCO model: treat class 0 (person) as person, known retail items as products
                 cls_id_int = int(cls_id)
                 is_person  = (
                     cls_id_int == 0
@@ -233,7 +259,7 @@ class VideoFrameIterator:
                 elif cls_name in _COCO_PRODUCT_CLASSES:
                     det.product_boxes.append((cls_name, box_t))
 
-        # Dominant YOLO class for this frame (4-class model only)
+        # pick the highest-priority class detected in this frame (4-class model only)
         if self._detector.is_4cls and yolo_result.boxes is not None:
             for _cls_v, _cof_v in zip(yolo_result.boxes.cls.cpu().numpy(),
                                        yolo_result.boxes.conf.cpu().numpy()):
@@ -252,6 +278,8 @@ class VideoFrameIterator:
                    conf: float) -> tuple[tuple[int, int, int], str]:
         """Return (BGR colour, label string) for a detection box."""
         if self._detector.is_4cls:
+            # show shoplifting as green if it's below the decision threshold
+            # so staff don't get alarmed by low-confidence hits that won't affect the verdict
             if cls_name == "shoplifting" and conf < 0.50:
                 return (0, 200, 0), f"normal {conf:.0%}"
             return _BOX_COLOURS.get(cls_name, (0, 200, 0)), f"{cls_name} {conf:.0%}"

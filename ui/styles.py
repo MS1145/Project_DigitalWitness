@@ -1,4 +1,14 @@
-"""ui/styles.py - Application CSS, injected once at startup."""
+"""
+ui/styles.py - Application CSS injected once at startup via st.markdown().
+
+All visual styling lives here so it's easy to change colours or spacing without
+hunting through individual view files. The CSS is injected as unsafe_allow_html
+in app.py's run() method before anything else renders.
+
+The gradient colours (#667eea -> #764ba2) were picked to look professional
+on both light and dark system themes. The blue (#1e3a5f) is the primary brand
+colour used in the header and section headings.
+"""
 
 CSS_BLOCK: str = """
 <style>
@@ -12,6 +22,7 @@ CSS_BLOCK: str = """
         font-size: 1.3rem; color: #666; text-align: center;
         margin-bottom: 2rem; font-weight: 400;
     }
+    /* alert severity banners - each severity level gets its own gradient */
     .alert-critical {
         background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
         color: white; padding: 1.5rem; border-radius: 10px; margin: 1rem 0;
@@ -41,14 +52,17 @@ CSS_BLOCK: str = """
         border-bottom: 3px solid #3d7ab5; padding-bottom: 0.5rem;
         margin: 2rem 0 1rem 0;
     }
+    /* progress bar colour override */
     .stProgress > div > div > div > div {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     }
+    /* primary button style */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white; border: none; padding: 0.75rem 2rem;
         font-size: 1.1rem; font-weight: 600; border-radius: 10px;
     }
+    /* hide Streamlit's default menu and footer to keep the UI clean */
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
     .stTabs [data-baseweb="tab-list"] { padding-left: 1rem; gap: 0.5rem; }
     .stTabs [data-baseweb="tab"] {

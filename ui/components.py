@@ -1,5 +1,14 @@
 """
 ui/components.py - Stateless header and sidebar renderers.
+
+These functions are pure rendering - they receive data and call st.* functions,
+no business logic. The sidebar model status comes from ModelRegistry.system_status()
+so if a model file goes missing the sidebar automatically shows a warning.
+
+Streamlit:
+    Streamlit Inc. (2019). Streamlit - The fastest way to build data apps.
+    https://streamlit.io
+    Apache 2.0 License.
 """
 from __future__ import annotations
 import streamlit as st
@@ -18,6 +27,7 @@ def render_sidebar(system_status: dict[str, bool]) -> None:
     """
     Args:
         system_status : dict from ModelRegistry.system_status()
+                        keys: yolo_ready, mobilenet_ready, bilstm_ready, all_ready
     """
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/security-checked.png", width=80)
@@ -39,6 +49,7 @@ def render_sidebar(system_status: dict[str, bool]) -> None:
         """)
         st.markdown("---")
         st.markdown("### System Status")
+        # show a single green tick if everything is loaded, else warn about what's missing
         if system_status.get("all_ready"):
             st.success("All models loaded")
         else:

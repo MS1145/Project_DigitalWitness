@@ -1,5 +1,23 @@
 """
 ui/pos_audit_view.py - Mock POS terminal and transaction-vs-video mismatch audit.
+
+The POS tab lets you enter items as if you were a cashier ringing them up,
+then compare the transaction against what the camera detected. The idea is
+that if the camera saw more item interactions than were scanned at the POS,
+that gap is a potential theft indicator worth investigating.
+
+Note: this uses a mock product catalog from config.py. In a real deployment
+the catalog would come from the store's ERP/POS system (e.g. via a REST API).
+
+Pandas is used for the transaction ledger and audit tables:
+    McKinney, W. (2010). Data Structures for Statistical Computing in Python.
+    Proceedings of the 9th Python in Science Conference.
+    https://pandas.pydata.org
+
+Plotly is used for the comparison bar chart:
+    Plotly Technologies Inc. (2015). Collaborative data science.
+    https://plotly.com
+    MIT License.
 """
 from __future__ import annotations
 import pandas as pd
@@ -14,9 +32,9 @@ class PosAuditView:
     """
     Renders the POS Audit tab.
 
-    Left  - Manual POS entry: user picks items + quantities.
-    Right - Video evidence: behavioural signals from the pipeline.
-    Bottom - Mismatch table: flags items detected but not rung up.
+    Left column  - Manual POS entry: user picks items and quantities.
+    Right column - Video evidence: behavioural signals from the pipeline.
+    Bottom       - Mismatch table: flags items detected but not rung up.
     """
 
     def render(self, result: PipelineResult | None) -> None:
@@ -38,12 +56,13 @@ class PosAuditView:
         st.markdown("---")
         self._render_mismatch_audit(result)
 
-    #  Private section renderers ─
+    # private section renderers
+
     def _render_pos_terminal(self) -> None:
         st.markdown("### Mock POS Terminal")
         st.caption("Enter items as they are being rung up at the checkout.")
 
-        cat_names  = [p["name"] for p in PRODUCT_CATALOG]
+        cat_names   = [p["name"] for p in PRODUCT_CATALOG]
         cat_by_name = {p["name"]: p for p in PRODUCT_CATALOG}
 
         with st.form("pos_form", clear_on_submit=False):
@@ -52,7 +71,7 @@ class PosAuditView:
             add_btn  = st.form_submit_button("Add to Transaction")
 
         if add_btn:
-            item       = dict(cat_by_name[sel_name])
+            item        = dict(cat_by_name[sel_name])
             item["qty"] = int(sel_qty)
             st.session_state.pos_items.append(item)
 
@@ -70,9 +89,10 @@ class PosAuditView:
                     "SKU"     : it["sku"],
                     "Product" : it["name"],
                     "Qty"     : it["qty"],
-                    "Unit £"  : f"£{it['price']:.2f}",
+                    "Unit"    : f"£{it['price']:.2f}",
                     "Subtotal": f"£{subtotal:.2f}",
                 })
+            # pandas DataFrame for the ledger table - McKinney (2010)
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.markdown(f"**Total: £{total:.2f}**")
         else:
@@ -138,9 +158,9 @@ class PosAuditView:
             st.info("Add items to the POS transaction to compare.")
             return
 
-        det    = result.detection
+        det   = result.detection
         verdict = result.lstm_verdict
-        events = result.behaviour_events
+        events  = result.behaviour_events
 
         pos_total_qty = sum(it["qty"] for it in st.session_state.pos_items)
         pos_total_val = sum(it["price"] * it["qty"] for it in st.session_state.pos_items)
@@ -158,7 +178,7 @@ class PosAuditView:
             {"Metric": "Item interactions detected (Picking-Holding)",
              "Value" : picking_count,
              "Status": ("More handled than scanned"
-                        if picking_count > pos_total_qty else "OK")},
+                         if picking_count > pos_total_qty else "OK")},
             {"Metric": "Shoplifting behaviour windows (LSTM)",
              "Value" : shop_windows,
              "Status": "Suspicious" if shop_windows > 0 else "None"},
@@ -190,6 +210,8 @@ class PosAuditView:
         else:
             st.success("No mismatches found - POS transaction consistent with video evidence.")
 
+        # bar chart comparing POS items vs detected interactions
+        # Plotly - Plotly Technologies Inc. (2015)
         fig = go.Figure()
         fig.add_bar(name="POS Items Scanned",
                     x=["Transaction"], y=[pos_total_qty], marker_color="#38ef7d")
