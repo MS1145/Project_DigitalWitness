@@ -20,18 +20,12 @@ __pycache__/
 *.swo
 *~
 
-# Jupyter Notebooks
-.ipynb_checkpoints/
-
 # Dataset (large files - do not commit)
 data/
 frames/
 
 # YOLO training artifacts
 runs/
-
-# Output files (user-generated)
-outputs/
 
 # OS files
 .DS_Store
