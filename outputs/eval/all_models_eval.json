@@ -1,0 +1,89 @@
+{
+  "yolo": {
+    "model": "YOLO yolo26_dw_v2.pt (4-class)",
+    "test_images": 247,
+    "classes": [
+      "looking-around",
+      "picking-holding",
+      "normal",
+      "shoplifting"
+    ],
+    "accuracy": 0.902834008097166,
+    "precision_macro": 0.8483845547675335,
+    "recall_macro": 0.8973892125706215,
+    "f1_macro": 0.8571774810676627,
+    "auc_roc_shoplifting_vs_rest": 0.9721966911764706,
+    "confusion_matrix": [
+      [
+        40,
+        1,
+        2,
+        5
+      ],
+      [
+        5,
+        46,
+        3,
+        5
+      ],
+      [
+        0,
+        0,
+        12,
+        0
+      ],
+      [
+        0,
+        0,
+        3,
+        125
+      ]
+    ]
+  },
+  "mobilenet": {
+    "model": "MobileNetV2 mobilenet_dw.pt (binary)",
+    "test_samples": 9363,
+    "classes": [
+      "normal",
+      "shoplifting"
+    ],
+    "accuracy": 0.9953006515005874,
+    "precision": 0.9996730957829356,
+    "recall": 0.993179603767457,
+    "f1_score": 0.996415770609319,
+    "auc_roc": 0.9999419853377441,
+    "confusion_matrix": [
+      [
+        3203,
+        2
+      ],
+      [
+        42,
+        6116
+      ]
+    ]
+  },
+  "bilstm": {
+    "model": "BiLSTM+Attention bilstm_dw.pt (binary)",
+    "test_sequences": 27,
+    "classes": [
+      "normal",
+      "shoplifting"
+    ],
+    "accuracy": 0.9629629629629629,
+    "precision": 1.0,
+    "recall": 0.9285714285714286,
+    "f1_score": 0.9629629629629629,
+    "auc_roc": 1.0,
+    "confusion_matrix": [
+      [
+        13,
+        0
+      ],
+      [
+        1,
+        13
+      ]
+    ]
+  }
+}
