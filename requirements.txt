@@ -2,9 +2,7 @@
 # Digital Witness - Python Dependencies
 # Python 3.10, 3.11, or 3.12 required
 #
-# DO NOT run this directly with pip install -r
-# Instead run:  setup.bat
-# It auto-detects your GPU and installs the correct PyTorch.
+# Run ->  pip install -r requirements.txt
 # ============================================================
 
 # --- Core ---
