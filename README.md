@@ -47,6 +47,18 @@ Raw Video
 
 ---
 
+## How to Run
+
+```bash
+pip install -r requirements.txt
+python run.py
+# Open http://localhost:8501
+```
+
+Requires Python 3.10–3.12. Model weights in `models/*.pt` must be present before running.
+
+---
+
 ## Decision Rule (Exact)
 
 ```python
@@ -63,32 +75,32 @@ BiLSTM output does **not** affect the verdict — it drives the XAI explanation 
 
 ## Model Performance
 
-| Model | Test Set | Accuracy | F1 | Precision | Recall | AUC-ROC |
-|---|---|---|---|---|---|---|
-| YOLO26 4-class | 247 images | 90.3% | 85.7% | 84.8% | 89.7% | 0.972 |
-| MobileNetV2 | 9,363 frames | 99.5% | 99.5% | 99.97% | 99.3% | 0.9999 |
-| BiLSTM + Attention | 27 sequences | 96.3% | 96.3% | 100% | 92.9% | 1.000 |
+| Model              | Test Set     | Accuracy | F1    | Precision | Recall | AUC-ROC |
+| ------------------ | ------------ | -------- | ----- | --------- | ------ | ------- |
+| YOLO26 4-class     | 247 images   | 90.3%    | 85.7% | 84.8%     | 89.7%  | 0.972   |
+| MobileNetV2        | 9,363 frames | 99.5%    | 99.5% | 99.97%    | 99.3%  | 0.9999  |
+| BiLSTM + Attention | 27 sequences | 96.3%    | 96.3% | 100%      | 92.9%  | 1.000   |
 
 ---
 
 ## Models
 
-| File | Size | Role |
-|---|---|---|
-| `yolo26_dw_v2.pt` | 5.3 MB | Domain-adaptive fine-tune — preferred |
-| `yolo26n.pt` | 5.5 MB | COCO base — automatic fallback |
-| `yolo26_retail.pt` | 5.4 MB | Legacy retail fine-tune |
-| `mobilenet_dw.pt` | 11.7 MB | Fine-tuned MobileNetV2 |
-| `bilstm_dw.pt` | 19.4 MB | 2-layer BiLSTM + Attention |
+| File               | Size    | Role                                  |
+| ------------------ | ------- | ------------------------------------- |
+| `yolo26_dw_v2.pt`  | 5.3 MB  | Domain-adaptive fine-tune — preferred |
+| `yolo26n.pt`       | 5.5 MB  | COCO base — automatic fallback        |
+| `yolo26_retail.pt` | 5.4 MB  | Legacy retail fine-tune               |
+| `mobilenet_dw.pt`  | 11.7 MB | Fine-tuned MobileNetV2                |
+| `bilstm_dw.pt`     | 19.4 MB | 2-layer BiLSTM + Attention            |
 
 ### YOLO Behavior Classes
 
-| Class | Description |
-|---|---|
-| `shoplifting` | Direct concealment gesture |
-| `looking-around` | Suspicious reconnaissance |
-| `picking-holding` | Product interaction |
-| `normal` | Standard shopping behavior |
+| Class             | Description                |
+| ----------------- | -------------------------- |
+| `shoplifting`     | Direct concealment gesture |
+| `looking-around`  | Suspicious reconnaissance  |
+| `picking-holding` | Product interaction        |
+| `normal`          | Standard shopping behavior |
 
 ### BiLSTM Architecture
 
@@ -110,18 +122,18 @@ Temperature scaling: T = 3.0
 
 ## Intent Score
 
-| Path | Formula |
-|---|---|
+| Path        | Formula                                                       |
+| ----------- | ------------------------------------------------------------- |
 | Shoplifting | `peak_conf × (0.5 + 0.5 × min(suspicious_segments / 5, 1.0))` |
-| Normal | `0.50 × concealment + 0.35 × bypass + 0.15 × duration` |
+| Normal      | `0.50 × concealment + 0.35 × bypass + 0.15 × duration`        |
 
-| Score | Severity |
-|---|---|
-| < 0.30 | NONE |
-| 0.30 – 0.49 | LOW |
-| 0.50 – 0.69 | MEDIUM |
-| 0.70 – 0.84 | HIGH |
-| >= 0.85 | CRITICAL |
+| Score       | Severity |
+| ----------- | -------- |
+| < 0.30      | NONE     |
+| 0.30 – 0.49 | LOW      |
+| 0.50 – 0.69 | MEDIUM   |
+| 0.70 – 0.84 | HIGH     |
+| >= 0.85     | CRITICAL |
 
 Alert fires when adjusted score >= 0.50. If BiLSTM is untrained, score is halved (× 0.50) and fairness_score drops to 0.50.
 
@@ -129,16 +141,16 @@ Alert fires when adjusted score >= 0.50. If BiLSTM is untrained, score is halved
 
 ## Key Hyperparameters
 
-| Parameter | Value | Purpose |
-|---|---|---|
-| `yolo_conf` | 0.20 | Detection confidence floor (low = better recall) |
-| `yolo_iou` | 0.45 | NMS IoU threshold |
-| `yolo_step` | 2 | Run YOLO every 2nd frame |
-| `feat_step` | 4 | Extract features every 4th frame |
-| `lstm_seq_len` | 45 | Frames per BiLSTM input window |
-| `lstm_stride` | 15 | Sliding window stride (50% overlap) |
-| `shop_threshold` | 0.70 | YOLO peak cutoff for SHOPLIFTING verdict |
-| `imgsz` | 320 | YOLO input size (43% faster than 640) |
+| Parameter        | Value | Purpose                                          |
+| ---------------- | ----- | ------------------------------------------------ |
+| `yolo_conf`      | 0.20  | Detection confidence floor (low = better recall) |
+| `yolo_iou`       | 0.45  | NMS IoU threshold                                |
+| `yolo_step`      | 2     | Run YOLO every 2nd frame                         |
+| `feat_step`      | 4     | Extract features every 4th frame                 |
+| `lstm_seq_len`   | 45    | Frames per BiLSTM input window                   |
+| `lstm_stride`    | 15    | Sliding window stride (50% overlap)              |
+| `shop_threshold` | 0.70  | YOLO peak cutoff for SHOPLIFTING verdict         |
+| `imgsz`          | 320   | YOLO input size (43% faster than 640)            |
 
 ---
 
@@ -146,46 +158,46 @@ Alert fires when adjusted score >= 0.50. If BiLSTM is untrained, score is halved
 
 `functional_test_runner.py` validates the live system end-to-end:
 
-| Test | What it checks |
-|---|---|
+| Test | What it checks                                            |
+| ---- | --------------------------------------------------------- |
 | FR01 | Video upload accepted — pipeline runs, metadata extracted |
-| FR02 | YOLO detects persons or behavior segments |
-| FR03 | ByteTrack assigns integer track IDs |
-| FR04 | POS mismatch flagged when picked_count > scanned_count |
-| FR05 | Intent score in [0.0, 1.0], severity in valid set |
-| FR06 | BiasAssessor halves score when BiLSTM is untrained |
-| FR07 | PipelineResult contains all required fields |
-| FR08 | JSON case file written to outputs/cases/ |
-| FR09 | ClipExtractor produces >= 1 GIF with gif_bytes |
+| FR02 | YOLO detects persons or behavior segments                 |
+| FR03 | ByteTrack assigns integer track IDs                       |
+| FR04 | POS mismatch flagged when picked_count > scanned_count    |
+| FR05 | Intent score in [0.0, 1.0], severity in valid set         |
+| FR06 | BiasAssessor halves score when BiLSTM is untrained        |
+| FR07 | PipelineResult contains all required fields               |
+| FR08 | JSON case file written to outputs/cases/                  |
+| FR09 | ClipExtractor produces >= 1 GIF with gif_bytes            |
 
 ---
 
 ## UI — 4 Tabs (Streamlit)
 
-| Tab | Contents |
-|---|---|
-| **Video Analysis** | Upload, live frame preview with YOLO boxes + classification badge, run button |
-| **Store Security** | Risk level banner, detection stats, up to 4 forensic GIF clips, advisory alert |
+| Tab                    | Contents                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Video Analysis**     | Upload, live frame preview with YOLO boxes + classification badge, run button                                    |
+| **Store Security**     | Risk level banner, detection stats, up to 4 forensic GIF clips, advisory alert                                   |
 | **Technical Analysis** | 5-step XAI: YOLO evidence → MobileNetV2 features → BiLSTM verdict → intent score breakdown → suspicious timeline |
-| **POS Audit** | Mock POS item entry, behavioral evidence, UNSCANNED / UNTOUCHED / MATCH mismatch flags |
+| **POS Audit**          | Mock POS item entry, behavioral evidence, UNSCANNED / UNTOUCHED / MATCH mismatch flags                           |
 
 ---
 
 ## Pipeline Stages (pipeline.py)
 
-| Stage | What happens |
-|---|---|
-| 1–3 | Load YOLO, MobileNetV2, BiLSTM |
-| 4 | Open video — extract FPS, resolution, frame count |
-| 5 | Per-frame loop: YOLO every 2nd frame, features every 4th, live BiLSTM badge, annotate output |
-| 6 | Sliding-window BiLSTM over full feature sequence |
-| 7 | Build 30-frame YOLO segments (dominant class per block) |
-| 8 | Apply decision rule → `yolo_peak >= 0.70` → verdict |
-| 9 | IntentScorer → raw risk score |
-| 10 | BiasAssessor → fairness-adjusted score + quality analysis |
-| 11 | AlertGenerator → emit AlertRecord if adj_score >= 0.50 |
-| 12 | ClipExtractor → animated GIFs of top suspicious windows |
-| 13 | Return PipelineResult |
+| Stage | What happens                                                                                 |
+| ----- | -------------------------------------------------------------------------------------------- |
+| 1–3   | Load YOLO, MobileNetV2, BiLSTM                                                               |
+| 4     | Open video — extract FPS, resolution, frame count                                            |
+| 5     | Per-frame loop: YOLO every 2nd frame, features every 4th, live BiLSTM badge, annotate output |
+| 6     | Sliding-window BiLSTM over full feature sequence                                             |
+| 7     | Build 30-frame YOLO segments (dominant class per block)                                      |
+| 8     | Apply decision rule → `yolo_peak >= 0.70` → verdict                                          |
+| 9     | IntentScorer → raw risk score                                                                |
+| 10    | BiasAssessor → fairness-adjusted score + quality analysis                                    |
+| 11    | AlertGenerator → emit AlertRecord if adj_score >= 0.50                                       |
+| 12    | ClipExtractor → animated GIFs of top suspicious windows                                      |
+| 13    | Return PipelineResult                                                                        |
 
 ---
 
@@ -230,47 +242,35 @@ Project_DigitalWitness/
 
 ---
 
-## How to Run
-
-```bash
-pip install -r requirements.txt
-python run.py
-# Open http://localhost:8501
-```
-
-Requires Python 3.10–3.12. Model weights in `models/*.pt` must be present before running.
-
----
-
 ## Key Dependencies
 
-| Library | Purpose |
-|---|---|
+| Library                    | Purpose                       |
+| -------------------------- | ----------------------------- |
 | PyTorch (separate install) | BiLSTM training and inference |
-| torchvision | MobileNetV2 backbone |
-| ultralytics >= 8.3 | YOLO26 |
-| lapx >= 0.5 | ByteTrack tracking |
-| OpenCV 4.8+ | Frame extraction, annotation |
-| Streamlit >= 1.32 | Web UI |
-| ReportLab >= 4.0 | PDF report generation |
-| scikit-learn 1.3+ | Metrics, evaluation |
+| torchvision                | MobileNetV2 backbone          |
+| ultralytics >= 8.3         | YOLO26                        |
+| lapx >= 0.5                | ByteTrack tracking            |
+| OpenCV 4.8+                | Frame extraction, annotation  |
+| Streamlit >= 1.32          | Web UI                        |
+| ReportLab >= 4.0           | PDF report generation         |
+| scikit-learn 1.3+          | Metrics, evaluation           |
 
 ---
 
 ## Branch Evolution
 
-| Aspect | `ipd` | `dev2` | `dev3` / `main` |
-|---|---|---|---|
-| Code structure | Modular `src/` | Single `app.py` | Modular `core/` + `ui/` |
-| CNN backbone | MobileNetV3-Small (576-dim) | MobileNetV2 (1280-dim) | MobileNetV2 (1280-dim) |
-| LSTM window | 30 frames | 45 frames | 45 frames |
-| Final verdict | BiLSTM majority | YOLO peak >= 0.70 | YOLO peak >= 0.70 |
-| Intent score weights | 4-component | yolo_peak × sustained | yolo_peak × sustained |
-| Testing | None | None | FR01–FR09 functional suite |
-| Evaluation notebooks | None | None | evaluate_models.ipynb |
-| Total code size | ~6,000 lines | ~1,250 lines | ~2,000 lines |
-| Model total size | ~189 MB | ~38 MB | ~42 MB |
+| Aspect               | `ipd`                       | `dev2`                 | `dev3` / `main`            |
+| -------------------- | --------------------------- | ---------------------- | -------------------------- |
+| Code structure       | Modular `src/`              | Single `app.py`        | Modular `core/` + `ui/`    |
+| CNN backbone         | MobileNetV3-Small (576-dim) | MobileNetV2 (1280-dim) | MobileNetV2 (1280-dim)     |
+| LSTM window          | 30 frames                   | 45 frames              | 45 frames                  |
+| Final verdict        | BiLSTM majority             | YOLO peak >= 0.70      | YOLO peak >= 0.70          |
+| Intent score weights | 4-component                 | yolo_peak × sustained  | yolo_peak × sustained      |
+| Testing              | None                        | None                   | FR01–FR09 functional suite |
+| Evaluation notebooks | None                        | None                   | evaluate_models.ipynb      |
+| Total code size      | ~6,000 lines                | ~1,250 lines           | ~2,000 lines               |
+| Model total size     | ~189 MB                     | ~38 MB                 | ~42 MB                     |
 
 ---
 
-*IIT 2026 Final Year Project — advisory system only. Human review required before any action.*
+_IIT 2026 Final Year Project — advisory system only. Human review required before any action._
