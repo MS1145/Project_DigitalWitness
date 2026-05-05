@@ -162,8 +162,8 @@ class DigitalWitnessApp:
         _status      = st.empty()
 
         def on_progress(pct: float, msg: str) -> None:
-            _prog.progress(min(int(pct), 100))
-            _status.text(msg)
+            _prog.progress(min(int(pct * 100), 100))
+            _status.text(msg if pct < 1.0 else "Finalising results...")
 
         def on_live_frame(frame_rgb, frame_num: int, total: int, stats: dict) -> None:
             # left panel - annotated video frame

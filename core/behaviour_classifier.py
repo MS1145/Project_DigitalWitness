@@ -68,35 +68,37 @@ class BehaviourClassifier:
         events    = []
 
         if len(features) < p.lstm_seq_len:
-            # video is too short to fill a full window so we pad with zeros
-            # and scale confidence down proportionally - short clips are less reliable
-            pad    = np.zeros((p.lstm_seq_len - len(features), p.mobilenet_dim))
-            seq    = np.vstack([feats_arr, pad])
-            probs  = self._infer(seq)
-            scale  = min(1.0, len(features) / p.lstm_seq_len)
+            pad          = np.zeros((p.lstm_seq_len - len(features), p.mobilenet_dim))
+            seq          = np.vstack([feats_arr, pad])
+            probs, attn  = self._infer(seq)
+            scale        = min(1.0, len(features) / p.lstm_seq_len)
+            # zero out attention on the padded (synthetic) frames so they
+            # don't mislead the XAI visualisation
+            attn[len(features):] = 0.0
             events.append(BehaviourEvent(
-                behavior_type = p.behavior_classes[int(np.argmax(probs))],
-                start_time    = 0.0,
-                end_time      = video_duration,
-                confidence    = min(float(np.max(probs)) * scale, 0.99),
-                probabilities = {c: float(prob) for c, prob in
-                                 zip(p.behavior_classes, probs)},
+                behavior_type    = p.behavior_classes[int(np.argmax(probs))],
+                start_time       = 0.0,
+                end_time         = video_duration,
+                confidence       = min(float(np.max(probs)) * scale, 0.99),
+                probabilities    = {c: float(prob) for c, prob in
+                                    zip(p.behavior_classes, probs)},
+                attention_weights = attn.tolist(),
             ))
         else:
-            # slide the window across the full feature sequence
-            # seq_len=45, stride=15 means consecutive windows overlap by 30 features
+            # seq_len=45, stride=15 → consecutive windows overlap by 30 features
             for start in range(0,
                                len(features) - p.lstm_seq_len + 1,
                                p.lstm_stride):
-                seq   = feats_arr[start:start + p.lstm_seq_len]
-                probs = self._infer(seq)
+                seq          = feats_arr[start:start + p.lstm_seq_len]
+                probs, attn  = self._infer(seq)
                 events.append(BehaviourEvent(
-                    behavior_type = p.behavior_classes[int(np.argmax(probs))],
-                    start_time    = start * p.feat_step / fps,
-                    end_time      = (start + p.lstm_seq_len) * p.feat_step / fps,
-                    confidence    = min(float(np.max(probs)), 0.99),
-                    probabilities = {c: float(prob) for c, prob in
-                                     zip(p.behavior_classes, probs)},
+                    behavior_type    = p.behavior_classes[int(np.argmax(probs))],
+                    start_time       = start * p.feat_step / fps,
+                    end_time         = (start + p.lstm_seq_len) * p.feat_step / fps,
+                    confidence       = min(float(np.max(probs)), 0.99),
+                    probabilities    = {c: float(prob) for c, prob in
+                                        zip(p.behavior_classes, probs)},
+                    attention_weights = attn.tolist(),
                 ))
         return events
 
@@ -107,18 +109,29 @@ class BehaviourClassifier:
         Used to update the live classification badge during frame iteration.
         Returns (label, confidence).
         """
-        seq   = np.array(recent_features[-self._params.lstm_seq_len:])
-        probs = self._infer(seq)
-        label = self._params.behavior_classes[int(np.argmax(probs))]
-        conf  = min(float(np.max(probs)), 0.99)
+        seq        = np.array(recent_features[-self._params.lstm_seq_len:])
+        probs, _   = self._infer(seq)   # attention not needed for the live badge
+        label      = self._params.behavior_classes[int(np.argmax(probs))]
+        conf       = min(float(np.max(probs)), 0.99)
         return label, conf
 
-    def _infer(self, seq: np.ndarray) -> np.ndarray:
-        """Run one forward pass and return softmax probabilities."""
+    def _infer(self, seq: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Run one forward pass and return (softmax probabilities, attention weights).
+
+        Attention weights shape: (seq_len,) — one scalar per input frame.
+        Higher weight = the BiLSTM considered that frame more important for
+        its classification decision. These weights are the primary XAI signal:
+        they answer "which moments in the video triggered the model?"
+
+        Attention mechanism based on:
+            Bahdanau, D., Cho, K., & Bengio, Y. (2015).
+            Neural Machine Translation by Jointly Learning to Align and Translate.
+            ICLR 2015. https://arxiv.org/abs/1409.0473
+        """
         x_t = torch.FloatTensor(seq[np.newaxis]).to(self._device)
         with torch.no_grad():
-            logits, _ = self._model(x_t)
-            # divide by TEMPERATURE before softmax to reduce overconfidence
-            probs     = torch.softmax(logits / self.TEMPERATURE,
-                                      dim=1).cpu().numpy()[0]
-        return probs
+            logits, attn = self._model(x_t)
+            probs        = torch.softmax(logits / self.TEMPERATURE,
+                                         dim=1).cpu().numpy()[0]
+            attn_weights = attn.cpu().numpy()[0]   # (seq_len,)
+        return probs, attn_weights

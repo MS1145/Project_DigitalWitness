@@ -327,6 +327,25 @@ class AnalysisPipeline:
         for _, cls_name in product_pickup_events:
             product_pickups[cls_name] = product_pickups.get(cls_name, 0) + 1
 
+        # ── attention timeline ────────────────────────────────────────────────
+        # Map each window's per-frame attention weights onto an absolute time axis
+        # and average across overlapping windows.  This produces one attention
+        # value per extracted feature frame, giving a continuous signal over
+        # the full video that the UI can plot as the XAI explanation.
+        _attn_buckets: dict[float, list[float]] = {}
+        for evt in behaviour_events:
+            if not evt.attention_weights:
+                continue
+            # feat index of the first frame in this window
+            win_start_feat = round(evt.start_time * fps_val / p.feat_step)
+            for i, w in enumerate(evt.attention_weights):
+                t = round((win_start_feat + i) * p.feat_step / fps_val, 2)
+                _attn_buckets.setdefault(t, []).append(float(w))
+        lstm_attn_timeline = [
+            {"time": t, "weight": float(np.mean(ws))}
+            for t, ws in sorted(_attn_buckets.items())
+        ]
+
         _cb(0.95, "Building case file...")
         detection = DetectionSummary(
             persons_tracked   = max_concurrent,
@@ -364,8 +383,9 @@ class AnalysisPipeline:
             quality              = quality,
             bias                 = bias,
             alert                = alert,
-            model_trained        = self._registry.bilstm_exists(),
-            annotated_video_path = visual_out_path,
+            model_trained            = self._registry.bilstm_exists(),
+            annotated_video_path     = visual_out_path,
+            lstm_attention_timeline  = lstm_attn_timeline,
         )
 
     # private helpers

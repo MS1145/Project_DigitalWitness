@@ -90,12 +90,13 @@ class AnalysisView:
 
         st.markdown("---")
 
-        # normal path: just show a compact summary and return early
+        # normal path: compact summary + XAI explanation, then return
         if not (verdict and verdict.is_shoplifting):
             self._render_normal_summary(result)
+            self._render_xai_summary(result)
             return
 
-        # shoplifting path: two-tab XAI layout
+        # shoplifting path: two-tab layout for deeper detail
         tab_sec, tab_tech = st.tabs(["Store Security", "Technical Analysis"])
         with tab_sec:
             self._render_store_security_tab(result)
@@ -160,6 +161,134 @@ class AnalysisView:
                 (below 70% threshold)
             </p>
         </div>""", unsafe_allow_html=True)
+
+    # =========================================================================
+    # XAI SUMMARY — why did the model say SHOPLIFTING?
+    # =========================================================================
+
+    def _render_xai_summary(self, result: PipelineResult) -> None:
+        """
+        Plain-English explanation of the decision, shown immediately after the
+        verdict banner so the user never has to hunt for the reason.
+
+        Three-column layout:
+          col 1 — WHAT triggered it   (YOLO detection evidence)
+          col 2 — WHEN it happened    (BiLSTM attention peak moments)
+          col 3 — HOW serious it is   (Intent score component breakdown)
+        """
+        is_shop = bool(result.lstm_verdict and result.lstm_verdict.is_shoplifting)
+
+        if is_shop:
+            st.markdown("### Why did the model flag this video?")
+        else:
+            st.markdown("### Why did the model classify this as Normal?")
+
+        sig     = result.yolo_signal
+        intent  = result.intent
+        attn    = result.lstm_attention_timeline
+        moments = result.yolo_shop_moments
+
+        col1, col2, col3 = st.columns(3)
+
+        # ── WHAT: YOLO confidence vs threshold ───────────────────────────────
+        with col1:
+            peak_c = sig.peak_conf if sig else 0.0
+            st.markdown("#### YOLO Confidence")
+            if is_shop:
+                first_t = moments[0]["time"] if moments else None
+                peak_t  = max(moments, key=lambda m: m["conf"])["time"] if moments else None
+                st.markdown(f"""
+**Peak confidence: `{peak_c:.1%}`** — above the 70% threshold.
+
+YOLO crossed the threshold at `{peak_t:.1f}s`, triggering the SHOPLIFTING verdict.
+
+First detection: `{first_t:.1f}s`
+Peak detection: `{peak_t:.1f}s`
+Frames flagged: `{sig.frames_with_shoplifting if sig else 0}`
+""" if first_t is not None else f"**Peak confidence: `{peak_c:.1%}`** (above 70% threshold).")
+            else:
+                st.markdown(f"""
+**Peak confidence: `{peak_c:.1%}`** — below the 70% threshold.
+
+YOLO never reached the 70% decision threshold in any frame of this video,
+so no shoplifting verdict was triggered.
+
+Frames with any shoplifting detection: `{sig.frames_with_shoplifting if sig else 0}`
+""")
+
+        # ── WHEN: BiLSTM attention peaks ──────────────────────────────────────
+        with col2:
+            st.markdown("#### BiLSTM Focus Moments")
+            if attn:
+                weights = np.array([p["weight"] for p in attn])
+                times   = [p["time"] for p in attn]
+                thresh  = weights.mean() + weights.std()
+                top_moments = sorted(
+                    [(times[i], weights[i]) for i in range(len(times))
+                     if weights[i] >= thresh],
+                    key=lambda x: x[1], reverse=True
+                )[:5]
+
+                label_text = ("Moments the model weighted most — these frames drove "
+                              "the shoplifting classification:" if is_shop else
+                              "Moments the model paid most attention to — no suspicious "
+                              "pattern was found in these frames:")
+                st.markdown(label_text)
+                bar_colour = "#cc0000" if is_shop else "#43a047"
+                for t, w in top_moments:
+                    bar = "█" * int(w / weights.max() * 10)
+                    st.markdown(f"- **{t:.1f}s** &nbsp; `{bar}` &nbsp; weight={w:.4f}")
+
+                fig = go.Figure(go.Bar(
+                    x=times, y=weights.tolist(),
+                    marker_color=[bar_colour if w >= thresh else "#b0bec5"
+                                  for w in weights],
+                ))
+                fig.update_layout(
+                    height=130,
+                    margin=dict(l=0, r=0, t=4, b=24),
+                    xaxis_title="Time (s)",
+                    yaxis_title="",
+                    showlegend=False,
+                    yaxis=dict(showticklabels=False),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Attention timeline not available.")
+
+        # ── HOW SERIOUS: intent components ───────────────────────────────────
+        with col3:
+            st.markdown("#### Risk Assessment")
+            if intent:
+                sev_colour = {
+                    "CRITICAL": "#c62828", "HIGH": "#e53935",
+                    "MEDIUM":   "#fb8c00", "LOW":  "#fdd835", "NONE": "#43a047",
+                }.get(intent.severity, "#78909c")
+
+                st.markdown(
+                    f"**Overall risk: "
+                    f"<span style='color:{sev_colour}'>{intent.severity}</span> "
+                    f"({intent.score:.2f} / 1.00)**",
+                    unsafe_allow_html=True,
+                )
+                comp = intent.components
+                if comp:
+                    # map component names to human-readable labels
+                    labels = {
+                        "concealment": "Concealment behaviour",
+                        "bypass":      "Exit/bypass behaviour",
+                        "duration":    "Sustained detection",
+                    }
+                    for key, score in sorted(comp.items(),
+                                             key=lambda x: x[1], reverse=True):
+                        label  = labels.get(key, key)
+                        filled = int(score * 10)
+                        bar    = "█" * filled + "░" * (10 - filled)
+                        st.markdown(f"- **{label}**: `{bar}` `{score:.2f}`")
+
+                st.caption(intent.explanation)
+            else:
+                st.info("Intent score not available.")
 
     # normal summary (compact, no XAI tabs needed)
 
@@ -284,18 +413,19 @@ class AnalysisView:
     # =========================================================================
 
     def _render_technical_tab(self, result: PipelineResult) -> None:
-        # steps 1-5: YOLO -> MobileNetV2 -> Decision -> Intent -> Timeline
-        self._render_step1_yolo(result)
-        self._render_step2_mobilenet(result)
-        self._render_step3_decision(result)
-        self._render_step4_intent(result)
-        self._render_step5_timeline(result)
+        # Order: XAI summary first (most relevant), then supporting detail
+        self._render_xai_summary(result)        # Why the model decided
+        self._render_step2_mobilenet(result)    # BiLSTM attention chart (detailed)
+        self._render_step4_intent(result)       # Intent score breakdown
+        self._render_step1_yolo(result)         # YOLO raw detection evidence
+        self._render_step3_decision(result)     # Decision rule explanation
+        self._render_step5_timeline(result)     # Full behaviour timeline
 
     def _render_step1_yolo(self, result: PipelineResult) -> None:
         sig     = result.yolo_signal
         det     = result.detection
         moments = result.yolo_shop_moments
-        st.markdown("### Step 1 - YOLO Detection Evidence")
+        st.markdown("### YOLO Detection Evidence")
         st.caption("Primary verdict signal. The peak frame confidence decides the final classification.")
 
         n_high = sig.shop_segs_above_50pct if sig else 0
@@ -337,20 +467,89 @@ class AnalysisView:
         st.markdown("---")
 
     def _render_step2_mobilenet(self, result: PipelineResult) -> None:
-        st.markdown("### Step 2 - MobileNetV2 Feature Extraction")
+        st.markdown("### BiLSTM Temporal Attention (XAI)")
         st.caption(
-            "1280-dim spatial feature vectors are extracted every 4th frame. "
-            "These sequences feed into the BiLSTM temporal classifier."
+            "Each bar shows how much the BiLSTM weighted that moment when making its "
+            "decision. Taller bars = frames the model considered most suspicious. "
+            "Weights are softmax-normalised and averaged across overlapping windows."
         )
-        # MobileNetV2: Sandler, M. et al. (2018). MobileNetV2: Inverted Residuals and
-        # Linear Bottlenecks. CVPR 2018. https://arxiv.org/abs/1801.04381
-        vm = result.video_metadata
-        if vm:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("File",       vm.filename)
-            c2.metric("Duration",   f"{vm.duration:.1f}s")
-            c3.metric("Resolution", f"{vm.width}x{vm.height}")
-            c4.metric("FPS",        f"{vm.fps:.1f}")
+
+        timeline = result.lstm_attention_timeline
+        if not timeline:
+            st.info("Attention data not available for this video.")
+            st.markdown("---")
+            return
+
+        times   = [p["time"]   for p in timeline]
+        weights = [p["weight"] for p in timeline]
+
+        # threshold: frames above mean + 1 std are highlighted as key moments
+        arr      = np.array(weights)
+        mean_w   = float(arr.mean())
+        thresh_w = float(arr.mean() + arr.std())
+        colours  = ["#cc0000" if w >= thresh_w else
+                    "#ff9800" if w >= mean_w   else
+                    "#b0bec5"
+                    for w in weights]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=times,
+            y=weights,
+            marker_color=colours,
+            hovertemplate="t=%{x:.1f}s  attention=%{y:.4f}<extra></extra>",
+        ))
+        # mark the decision threshold line
+        fig.add_hline(
+            y=thresh_w, line_dash="dot", line_color="#cc0000",
+            annotation_text="high-attention threshold",
+            annotation_position="top right",
+        )
+        fig.update_layout(
+            height=240,
+            margin=dict(l=20, r=20, t=10, b=30),
+            xaxis_title="Time in video (seconds)",
+            yaxis_title="Attention weight",
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # pick top-3 moments for a plain-English summary
+        top_idx = sorted(range(len(weights)), key=lambda i: weights[i], reverse=True)[:3]
+        top_times = sorted([times[i] for i in top_idx])
+        st.caption(
+            f"**Key moments flagged by the model:** "
+            + "  ·  ".join(f"{t:.1f}s" for t in top_times)
+            + "  (red bars above dashed line)"
+        )
+
+        with st.expander("What does this chart mean?"):
+            st.markdown("""
+**Temporal Attention — the XAI explanation for the BiLSTM decision.**
+
+The BiLSTM+Attention classifier does not treat every frame equally.
+Inside the model, a learned attention layer assigns a weight to each of the
+45 frames in every sliding window. These weights sum to 1.0 (softmax) and
+represent how much the model "focused" on each moment before producing its
+classification.
+
+**How to read this chart:**
+- Each bar = one extracted feature frame (every 4th video frame).
+- Height = average attention weight across all overlapping windows that covered that frame.
+- **Red bars** exceed mean + 1σ — these are the moments the model relied on most.
+- **Orange bars** are above-average attention — secondary evidence.
+- **Grey bars** contributed little to the final decision.
+
+**Why attention weights are valid XAI:**
+Attention-based explainability is an intrinsic, model-internal technique —
+unlike post-hoc approximations (LIME, SHAP), the weights are a direct product
+of the forward pass. They do not approximate the model; they *are* the model's
+internal reasoning about temporal importance.
+
+Reference: Bahdanau, D., Cho, K., & Bengio, Y. (2015). Neural Machine Translation
+by Jointly Learning to Align and Translate. ICLR 2015.
+https://arxiv.org/abs/1409.0473
+            """)
         st.markdown("---")
 
     def _render_step3_decision(self, result: PipelineResult) -> None:
@@ -363,7 +562,7 @@ class AnalysisView:
         _n_sec  = len({round(m["time"], 0) for m in moments})
         _spread = "multiple distinct moments" if _n_sec > 1 else "a single moment"
 
-        st.markdown("### Step 3 - Classification Decision")
+        st.markdown("### Classification Decision")
         st.markdown(f"""
 **Decision rule (single peak threshold):**
 - Peak shoplifting confidence **>= 70%** -> SHOPLIFTING
@@ -384,7 +583,7 @@ No segment counting, no vote accumulation - only the highest confidence frame de
         intent = result.intent
         if not intent:
             return
-        st.markdown("### Step 4 - Intent Score")
+        st.markdown("### Intent Score")
         st.caption("Composite risk score derived from peak confidence and sustained detection segments.")
         i_c1, i_c2 = st.columns([1, 2])
         with i_c1:
@@ -416,7 +615,7 @@ No segment counting, no vote accumulation - only the highest confidence frame de
         st.markdown("---")
 
     def _render_step5_timeline(self, result: PipelineResult) -> None:
-        st.markdown("### Step 5 - Behaviour Timeline")
+        st.markdown("### Behaviour Timeline")
         st.caption("YOLO 30-frame segments showing detected behaviour classes over time.")
 
         yolo_segs = result.yolo_segments

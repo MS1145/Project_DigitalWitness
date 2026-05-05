@@ -47,12 +47,18 @@ class BehaviourEvent:
 
     Not frozen because the clip extractor sometimes mutates events when
     building the fallback from YOLO segments.
+
+    attention_weights: one scalar per input frame in this window (seq_len values).
+    Higher weight = BiLSTM considered that frame more important. These are the
+    raw softmax outputs of the TemporalAttention module and sum to 1.0 across
+    the window. Primary XAI signal for temporal explainability.
     """
-    behavior_type: str
-    start_time:    float
-    end_time:      float
-    confidence:    float
-    probabilities: dict[str, float]
+    behavior_type:    str
+    start_time:       float
+    end_time:         float
+    confidence:       float
+    probabilities:    dict[str, float]
+    attention_weights: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -145,3 +151,7 @@ class PipelineResult:
     model_trained:        bool                   = False
     annotated_video_path: str | None              = None
     suspicious_frames:    list[dict[str, Any]]   = field(default_factory=list)
+    # Aggregated attention timeline: list of {"time": float, "weight": float}
+    # Built by averaging overlapping window weights onto a per-frame time axis.
+    # Used by the XAI visualisation to show which moments the BiLSTM focused on.
+    lstm_attention_timeline: list[dict[str, Any]] = field(default_factory=list)
